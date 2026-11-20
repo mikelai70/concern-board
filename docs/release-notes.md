@@ -15,7 +15,7 @@
 - 參與者畫面：等待畫面（投票功能在 v0.3）
 - 本機預覽：`npm run dev`（emulator＋示範場次 TEST26，不碰正式資料）；`tools/sim-helpers.js` 模擬 5 位小幫手同時輸入
 
-### 安全規則與規格 B5 草案的差異（待 Mike 確認後寫回 spec.md B5）
+### 安全規則與規格 B5 草案的差異（2026/11/20 經 Mike 同意，已寫回 spec.md B5）
 
 先說明 Firebase 安全規則的兩個特性，後面三點都和它們有關：
 - **權限是「按位置」給的。** 資料像資料夾：`sessions` 底下有一個個場次 `sessions/{代碼}`，每個場次底下再有 `meta`、`items`、`votes`、`participants`。規則寫在哪一層，就只開放那一層和它底下的東西；上一層、旁邊那一層都不算。
