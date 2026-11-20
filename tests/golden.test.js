@@ -6,6 +6,7 @@ import {
   tally, rankCompetition, maxVotes, mergeItems, unmerge, validateConfig,
   toExportJson, fromImportJson, nextPhase, dupNameWarnings, normalizeItemText,
   isValidPin, canHelperEdit, validateGroupCount, generateCode, isValidCode, isDuplicateName,
+  canMerge, deleteItem, splitItem, helperActions, toPathUpdates, groupLabel,
 } from '../logic.js';
 
 const config = JSON.parse(readFileSync(new URL('../config/templates/prmc-workshop.json', import.meta.url), 'utf8'));
@@ -117,6 +118,92 @@ test('G9：JSON 匯出後再匯入 → 內容相同，visibility＝private', () 
   assert.equal(r.session.meta.visibility, 'private');
   const { access, secrets, ...plain } = session;
   assert.deepEqual(r.session, { ...plain, meta: { ...plain.meta, visibility: 'private' } });
+});
+
+test('G10：不同分類不能合併（T23）', () => {
+  const items = {
+    A: { text: '甲', cat: 'impact', groups: { 1: true }, status: 'active' },
+    B: { text: '乙', cat: 'cost', groups: { 2: true }, status: 'active' },
+  };
+  assert.equal(canMerge(items, ['A', 'B']).ok, false);
+  assert.throws(() => mergeItems(items, ['A', 'B'], '甲', { newId: 'M' }), /不同分類/);
+  items.B.cat = 'impact'; // 分類寫錯，先改分類
+  assert.equal(canMerge(items, ['A', 'B']).ok, true);
+  assert.equal(canMerge(items, ['A']).ok, false);
+});
+
+test('G11：分拆（T24）', () => {
+  const items = { A: { text: '甲乙都有', cat: 'impact', groups: { 2: true }, rewritten: false, status: 'active' } };
+  const { id, item } = splitItem(items, 'A', config.categories, { newId: 'S' });
+  assert.equal(id, 'S');
+  assert.deepEqual(item.groups, { 2: true });
+  assert.equal(item.cat, 'cost');
+  assert.equal(item.rewritten, true);
+  assert.equal(item.text, '甲乙都有');
+  assert.ok(!('sources' in item));
+  assert.equal(splitItem({ B: { ...items.A, cat: 'cost' } }, 'B', config.categories, { newId: 'T' }).item.cat, 'impact');
+  assert.throws(() => splitItem({ C: { ...items.A, status: 'merged' } }, 'C', config.categories, { newId: 'U' }));
+});
+
+test('G12：刪除合併後的項目：cascade 連同來源、unmerge 拆回一層（T20）', () => {
+  const base = (t, g) => ({ text: t, cat: 'impact', groups: { [g]: true }, rewritten: false, status: 'active' });
+  let items = { A: base('A', 1), B: base('B', 2), C: base('C', 3) };
+  items = { ...items, ...mergeItems(items, ['A', 'B'], 'AB', { newId: 'M' }).updates };
+  items = { ...items, ...mergeItems(items, ['M', 'C'], 'ABC', { newId: 'N' }).updates };
+  const cascade = deleteItem(items, 'N', 'cascade');
+  assert.deepEqual(Object.keys(cascade).sort(), ['A', 'B', 'C', 'M', 'N']);
+  assert.ok(Object.values(cascade).every((v) => v === null));
+  const un = deleteItem(items, 'N', 'unmerge');
+  assert.equal(un.N, null);
+  assert.equal(un.M.status, 'active');
+  assert.equal(un.C.status, 'active');
+  assert.ok(!('A' in un), '拆回只拆一層');
+  assert.deepEqual(deleteItem(items, 'C', 'cascade'), { C: null }, '一般題目直接刪除');
+});
+
+test('G13：合併後的已改寫（T25）', () => {
+  const items = {
+    A: { text: '甲', cat: 'impact', groups: { 1: true }, rewritten: false, status: 'active' },
+    B: { text: '乙', cat: 'impact', groups: { 3: true }, rewritten: false, status: 'active' },
+  };
+  assert.equal(mergeItems(items, ['A', 'B'], '甲', { newId: 'M' }).item.rewritten, false);
+  assert.equal(mergeItems(items, ['A', 'B'], '甲和乙', { newId: 'M' }).item.rewritten, true);
+  const rw = { ...items, B: { ...items.B, rewritten: true } };
+  assert.equal(mergeItems(rw, ['A', 'B'], '甲', { newId: 'M' }).item.rewritten, true);
+});
+
+test('小幫手可以做的動作：合併、拆回只在合併階段；分拆依 T24', () => {
+  const mine = { groups: { 2: true }, status: 'active' };
+  const other = { groups: { 3: true }, status: 'active' };
+  const merged = { groups: { 2: true, 3: true }, status: 'active', sources: { a: true, b: true } };
+  assert.deepEqual(helperActions('collect', 2, mine), { edit: true, split: true, select: false, unmerge: false, delete: true });
+  assert.equal(helperActions('collect', 2, other).split, false);
+  assert.equal(helperActions('collect', 2, merged).delete, false);
+  assert.deepEqual(helperActions('merge', 2, other), { edit: true, split: true, select: true, unmerge: false, delete: true });
+  assert.equal(helperActions('merge', 2, merged).unmerge, true);
+  assert.equal(helperActions('share', 2, mine).split, false);
+});
+
+test('組別：Firebase 存成陣列時也正確（[null,true,null,true] ＝ 第 1、3 組）', () => {
+  assert.equal(groupLabel([null, true, null, true]), '第 1、3 組');
+  const items = {
+    A: { text: '甲', cat: 'impact', groups: [null, true], status: 'active' },
+    B: { text: '乙', cat: 'impact', groups: [null, null, null, true], status: 'active' },
+  };
+  assert.deepEqual(mergeItems(items, ['A', 'B'], '甲', { newId: 'M' }).item.groups, { 1: true, 3: true });
+  assert.equal(validateGroupCount(2, config, { items }).ok, false);
+});
+
+test('toPathUpdates：只寫有變的欄位', () => {
+  const items = { A: { text: '甲', status: 'active', groups: { 1: true } } };
+  const updates = mergeItems({ ...items, B: { text: '乙', status: 'active', groups: { 2: true } } }, ['A', 'B'], '甲', { newId: 'M' }).updates;
+  const u = toPathUpdates({ ...items, B: { text: '乙', status: 'active', groups: { 2: true } } }, updates);
+  assert.equal(u['A/status'], 'merged');
+  assert.equal(u['A/mergedInto'], 'M');
+  assert.ok(!('A/text' in u));
+  assert.equal(u.M.text, '甲');
+  const un = toPathUpdates({ A: { text: '甲', status: 'merged', mergedInto: 'M' }, M: { sources: { A: true } } }, { A: { text: '甲', status: 'active' }, M: null });
+  assert.deepEqual(un, { 'A/status': 'active', 'A/mergedInto': null, M: null });
 });
 
 test('匯入：版本比程式新、或不是本工具的檔案 → 拒絕', () => {

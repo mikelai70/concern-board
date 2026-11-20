@@ -8,7 +8,9 @@ const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去掉容易混淆的 
 
 // ---------- 小工具 ----------
 const entries = (obj) => Object.entries(obj || {});
-const groupKeys = (item) => Object.keys((item && item.groups) || {}).map(Number).filter((n) => n > 0).sort((a, b) => a - b);
+// Firebase 會把數字 key 的物件存成陣列（{1:true,3:true} → [null,true,null,true]），所以只取值為 true 的 key
+const groupKeys = (item) => Object.entries((item && item.groups) || {}).filter(([, v]) => v === true)
+  .map(([k]) => Number(k)).filter((n) => n > 0).sort((a, b) => a - b);
 const isActive = (item) => item && item.status === 'active';
 
 /** 組別顯示文字：{1:true,3:true} → 「第 1、3 組」 */
@@ -74,6 +76,23 @@ export function canHelperEdit(phaseType, helperGroup, item) {
   if (phaseType !== 'collect') return false;
   if (!item) return true; // 新增本組的題目
   return Boolean(item.groups && item.groups[String(helperGroup)]);
+}
+
+/**
+ * 小幫手對一題能做哪些事（畫面依此顯示按鈕）。
+ * 合併、拆回、刪除合併後的題目只在合併階段（A5、T20）；分拆依 T24（收集限本組、合併所有組）。
+ */
+export function helperActions(phaseType, helperGroup, item) {
+  const edit = canHelperEdit(phaseType, helperGroup, item);
+  const merged = Boolean(item && item.sources);
+  const inMerge = phaseType === 'merge';
+  return {
+    edit,
+    split: edit && Boolean(item) && isActive(item),
+    select: inMerge && Boolean(item) && isActive(item),
+    unmerge: inMerge && merged,
+    delete: edit && (!merged || inMerge),
+  };
 }
 
 // ---------- T10：組數 ----------
@@ -146,16 +165,22 @@ export function tally(items, votes, cat, voteCfg = {}) {
  * 回傳 { id, item, updates }：updates 是要寫入 items/ 的變更（新項目＋來源改為 merged）。
  * opts：{ newId, uid, now }（id 與時間由呼叫端提供，保持純函式）。
  */
+/** 能不能合併：2 題以上、都是 active、同一分類（T23）。 */
+export function canMerge(items, ids) {
+  const uniq = [...new Set(ids || [])];
+  if (uniq.length < 2) return { ok: false, error: '至少要選 2 題才能合併' };
+  if (uniq.some((id) => !isActive(items && items[id]))) return { ok: false, error: '有題目不存在或已經被合併' };
+  const cats = new Set(uniq.map((id) => items[id].cat));
+  if (cats.size > 1) return { ok: false, error: '不同分類的題目不能合併，請先把分類改成一致' };
+  return { ok: true, error: null };
+}
+
 export function mergeItems(items, ids, text, opts = {}) {
+  const check = canMerge(items, ids);
+  if (!check.ok) throw new Error(check.error);
   const uniq = [...new Set(ids)];
-  if (uniq.length < 2) throw new Error('至少要選 2 題才能合併');
-  const sources = uniq.map((id) => {
-    const it = items[id];
-    if (!isActive(it)) throw new Error(`題目 ${id} 不存在或已經被合併`);
-    return [id, it];
-  });
+  const sources = uniq.map((id) => [id, items[id]]);
   const cat = sources[0][1].cat;
-  if (sources.some(([, it]) => it.cat !== cat)) throw new Error('不同分類的題目不能合併');
   const t = normalizeItemText(text, opts.maxLength);
   if (!t.ok) throw new Error(t.error);
   const id = opts.newId;
@@ -192,6 +217,66 @@ export function unmerge(items, id, opts = {}) {
     updates[sid] = { ...rest, status: 'active', updatedAt: now, updatedBy: opts.uid ?? null };
   }
   return updates;
+}
+
+/**
+ * T20：刪除項目。一般項目直接刪除。合併產生的項目：
+ * mode='unmerge'（預設）＝拆回一層；mode='cascade'＝連同所有來源（含來源的來源）一起刪除。
+ * 回傳要寫入 items/ 的變更（被刪的值為 null）。
+ */
+export function deleteItem(items, id, mode = 'unmerge', opts = {}) {
+  const it = items[id];
+  if (!it) throw new Error('題目不存在');
+  if (!it.sources) return { [id]: null };
+  if (mode === 'unmerge') return unmerge(items, id, opts);
+  if (mode !== 'cascade') throw new Error(`不認得的刪除方式：${mode}`);
+  const updates = {};
+  const walk = (x) => {
+    if (x in updates) return;
+    updates[x] = null;
+    const node = items[x];
+    if (node && node.sources) Object.keys(node.sources).forEach(walk);
+  };
+  walk(id);
+  return updates;
+}
+
+/**
+ * T24：分拆。複製出一個新項目：組別相同、分類為設定檔中的下一類、rewritten=true、文字沿用。
+ * 不記錄來源關係。opts：{ newId, uid, group, now }
+ */
+export function splitItem(items, id, categories, opts = {}) {
+  const it = items[id];
+  if (!isActive(it)) throw new Error('只能分拆目前有效的題目');
+  if (!opts.newId) throw new Error('缺少新項目的 id');
+  const keys = categories.map((c) => c.key);
+  const i = keys.indexOf(it.cat);
+  const cat = keys.length > 1 ? keys[(i + 1) % keys.length] : it.cat;
+  const now = opts.now ?? null;
+  const item = {
+    text: it.text, cat, groups: Object.fromEntries(groupKeys(it).map((g) => [String(g), true])), rewritten: true, status: 'active',
+    createdBy: opts.uid ?? null, createdGroup: opts.group ?? null, createdAt: now, updatedAt: now, updatedBy: opts.uid ?? null,
+  };
+  return { id: opts.newId, item };
+}
+
+/**
+ * 把上面函式產生的「整筆」變更轉成逐欄位的路徑寫入：新項目整筆寫入、刪除寫 null、
+ * 既有項目只寫有變的欄位（不會蓋掉別人同時修改的其他欄位）。updatedAt、updatedBy 由呼叫端補上。
+ */
+export function toPathUpdates(items, updates) {
+  const out = {};
+  for (const [id, next] of Object.entries(updates)) {
+    const cur = items[id];
+    if (next === null) { out[id] = null; continue; }
+    if (!cur) { out[id] = next; continue; }
+    for (const k of new Set([...Object.keys(cur), ...Object.keys(next)])) {
+      if (k === 'updatedAt' || k === 'updatedBy') continue;
+      const a = cur[k] ?? null; const b = next[k] ?? null;
+      if (JSON.stringify(a) !== JSON.stringify(b)) out[`${id}/${k}`] = b;
+    }
+  }
+  return out;
 }
 
 // ---------- B4：設定檔驗證 ----------

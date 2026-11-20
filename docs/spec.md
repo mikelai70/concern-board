@@ -372,7 +372,7 @@ flowchart LR
 | G10 | 合併一題「實質影響」和一題「成本」 | canMerge 回傳錯誤，mergeItems 拒絕（T23） |
 | G11 | 分拆第 2 組的「實質影響」題目 | 新項目：組別＝{2}、分類＝成本、rewritten＝true、文字相同、沒有 sources（T24） |
 | G12 | M 由 A、B 合併；N 由 M、C 合併；刪除 N，mode＝cascade | N、M、A、B、C 全部刪除；mode＝unmerge 時 M、C 恢復 active（T20） |
-| G13 | 合併時選用 A 的原文字；另一次自己改寫 | 前者 rewritten＝A 的值（A、B 都沒改寫時是 false）；後者 true（T25） |
+| G13 | 合併時選用 A 的原文字；另一次自己改寫 | 選用原文字：A、B 都沒改寫時 false，其中一題已改寫時 true；自己改寫：true（T25） |
 
 **權限測試（`tests/rules.test.js`，用 emulator）**：
 - 私人場次：非擁有者讀取失敗
