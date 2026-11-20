@@ -36,6 +36,7 @@ npm run dev                                   # 本機預覽：emulator＋示範
 node tools/sim-helpers.js                     # （npm run dev 執行中）模擬 5 位小幫手同時輸入
 npx firebase deploy --only database           # 部署安全規則（要先經 Mike 同意）
 ```
+- 給 Mike 的本機練習步驟（帳號、PIN、要檢查的畫面、常見問題）寫在 `README.md`；改動 `tools/dev.js` 時一併更新。
 - 在 localhost 開啟時預設連 emulator；網址加 `?prod`（例如 `http://localhost:8000/?prod#/admin`）才連正式 Firebase。
 
 ## 工作流程
