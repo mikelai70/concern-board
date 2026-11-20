@@ -4,6 +4,7 @@
 > 首次使用：3.成案期決策演練工作坊（12/11）14:25～15:17
 > 文件分兩部分：**Part A 使用說明**（主持人、小幫手、參與者、擁有者）／**Part B 開發交接**（Claude Code、未來的維護者）
 > 決策紀錄 T1～T22 不得自行重新詮釋；要修改時，先改決策紀錄，再改規格與程式。
+> 修訂：2026/11/20 B5 安全規則定稿（5 項差異見 B5，經 Mike 同意；決策紀錄未變更）
 
 ---
 
@@ -239,23 +240,27 @@ flowchart LR
 ```
 驗證規則：分類的 key 不能重複；`phases` 裡的 category 必須存在；`groups.count` 介於 1～`max`，且 max ≤ 8；`maxPerVoter` 介於 1～10。驗證失敗時拒絕匯入，並列出所有錯誤。
 
-## B5. 安全規則（草案，v0.1 用 emulator 測試後定稿）
+## B5. 安全規則（v0.1 定稿，2026/11/20 經 Mike 同意）
 
 ```json
 {
   "rules": {
     "sessions": {
+      ".read": "auth != null && auth.uid === 'OWNER_UID'",
       "$code": {
         ".read": "auth != null && (auth.uid === 'OWNER_UID' || data.child('meta/visibility').val() === 'live' || data.child('meta/visibility').val() === 'demo')",
+        ".write": "auth != null && auth.uid === 'OWNER_UID'",
         "meta": {
           ".write": "auth != null && auth.uid === 'OWNER_UID'",
+          "visibility": { ".validate": "newData.val() === 'private' || newData.val() === 'live' || newData.val() === 'demo'" },
+          "groupCount": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 8" },
           "phase": {
-            ".write": "auth != null && (auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
+            ".write": "auth != null && (auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
           }
         },
         "items": {
           "$id": {
-            ".write": "auth != null && (auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('access/'+$code+'/helpers/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/helperPin').val() && (root.child('sessions/'+$code+'/meta/phase/type').val() === 'merge' || (root.child('sessions/'+$code+'/meta/phase/type').val() === 'collect' && (!data.exists() || data.child('groups/'+root.child('access/'+$code+'/helpers/'+auth.uid+'/group').val()).exists()) && (!newData.exists() || newData.child('groups/'+root.child('access/'+$code+'/helpers/'+auth.uid+'/group').val()).exists())))))",
+            ".write": "auth != null && (auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('secrets/'+$code+'/helperPin').exists() && root.child('access/'+$code+'/helpers/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/helperPin').val() && (root.child('sessions/'+$code+'/meta/phase/type').val() === 'merge' || (root.child('sessions/'+$code+'/meta/phase/type').val() === 'collect' && (!data.exists() || data.child('groups/'+root.child('access/'+$code+'/helpers/'+auth.uid+'/group').val()).exists()) && (!newData.exists() || newData.child('groups/'+root.child('access/'+$code+'/helpers/'+auth.uid+'/group').val()).exists())))))",
             "text": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 150" }
           }
         },
@@ -264,30 +269,33 @@ flowchart LR
             "$uid": {
               ".write": "auth != null && auth.uid === $uid && root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'vote' && root.child('sessions/'+$code+'/meta/phase/category').val() === $cat",
               ".validate": "newData.hasChildren(['name','group','ts'])",
-              "v1": { ".validate": "root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat" },
-              "v2": { ".validate": "newData.val() !== newData.parent().child('v1').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat" },
-              "v3": { ".validate": "newData.val() !== newData.parent().child('v1').val() && newData.val() !== newData.parent().child('v2').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat" },
+              "v1": { ".validate": "auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
+              "v2": { ".validate": "auth.uid === 'OWNER_UID' || (newData.val() !== newData.parent().child('v1').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
+              "v3": { ".validate": "auth.uid === 'OWNER_UID' || (newData.val() !== newData.parent().child('v1').val() && newData.val() !== newData.parent().child('v2').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
               "name":  { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30" },
               "group": { ".validate": "newData.isNumber()" },
-              "ts":    { ".validate": "newData.val() === now" },
+              "ts":    { ".validate": "auth.uid === 'OWNER_UID' || newData.val() === now" },
               "$other": { ".validate": false }
             }
           }
         },
         "participants": {
-          "$uid": { ".write": "auth != null && auth.uid === $uid && root.child('sessions/'+$code+'/meta/visibility').val() === 'live'" }
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('sessions/'+$code+'/meta/visibility').val() === 'live'"
+          }
         }
       }
     },
     "access": {
       "$code": {
+        ".write": "auth != null && auth.uid === 'OWNER_UID'",
         "helpers": { "$uid": {
           ".read": "auth != null && (auth.uid === $uid || auth.uid === 'OWNER_UID')",
-          ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && newData.child('pin').val() === root.child('secrets/'+$code+'/helperPin').val()))"
+          ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && root.child('secrets/'+$code+'/helperPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/helperPin').val()))"
         }},
         "hosts": { "$uid": {
           ".read": "auth != null && (auth.uid === $uid || auth.uid === 'OWNER_UID')",
-          ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && newData.child('pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
+          ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && root.child('secrets/'+$code+'/hostPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
         }}
       }
     },
@@ -300,7 +308,13 @@ flowchart LR
 - `OWNER_UID` 在設定步驟 4 換成擁有者的 UID（T22）。
 - 已知的限制：「每段最多 min(3, n) 票」的 n 由前端檢查，規則只限制最多 3 票（v1～v3）。
 - 正確的 PIN 只會被寫在本人的 `access/{code}/...` 下，而這個路徑只有本人和擁有者能讀；`secrets` 一律不能讀取。
-- 這份規則是草案，v0.1 必須用 Firebase emulator 加上 `@firebase/rules-unit-testing` 逐項驗證 B8 的權限案例，通過後才能部署。
+- 正本是 `database.rules.json`；這裡的內容和它相同（只有 UID 換成 `OWNER_UID`）。已用 Firebase emulator 加上 `@firebase/rules-unit-testing` 驗證 B8 的全部權限案例（`tests/rules.test.js`）。
+- **和原草案的差異（2026/11/20 經 Mike 同意）**：草案以工作坊當天的角色為主，emulator 測試發現擁有者的管理流程有缺口，另有一個 PIN 漏洞。決策紀錄 T1～T22、R1～R6 都沒有變更。
+  1. `sessions` 加上「只有擁有者可以讀整個清單」：草案只開放讀單一場次，`#/admin` 列不出場次。
+  2. `sessions/$code`、`access/$code` 加上「擁有者可以整筆寫入、刪除」：建立、匯入場次是一次寫入整個場次（含 `votes`、`participants`），草案只讓擁有者寫 `meta` 和單題 `items`，整筆會被拒絕。
+  3. 選票的 `v1`～`v3`、`ts` 驗證對擁有者跳過：匯入舊場次時，過去的投票時間不等於 `now`、會後合併過的題目不再是 active，整筆匯入會失敗。參與者投票時照樣檢查；指向已合併題目的票計票時本來就忽略（G7）。
+  4. PIN 比對加上「`secrets` 裡必須有 PIN」：草案中，還沒設定 PIN 的進行中場次，空值等於空值，任何人不輸入 PIN 就能取得小幫手、主持人權限。
+  5. `meta/visibility` 只能是 private／live／demo；`meta/groupCount` 只能是 1～8（T10、T12）。
 
 ## B6. 演算法（`logic.js`，純函式）
 

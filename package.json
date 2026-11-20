@@ -1,0 +1,19 @@
+{
+  "name": "concern-board",
+  "version": "0.1.0",
+  "private": true,
+  "description": "關注點共編投票工具（靜態網頁；這個檔案只用來安裝測試工具）",
+  "type": "module",
+  "scripts": {
+    "test:golden": "node --test tests/golden.test.js",
+    "test:rules": "firebase emulators:exec --only database,auth --project demo-concern-board \"node --test tests/rules.test.js\"",
+    "test": "npm run test:golden && npm run test:rules",
+    "serve": "node tools/serve.js",
+    "dev": "node tools/dev.js"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase": "^10.12.0",
+    "firebase-tools": "^14.0.0"
+  }
+}
