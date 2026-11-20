@@ -1,0 +1,23 @@
+{
+  "templateId": "prmc-workshop",
+  "title": "成案期決策演練工作坊",
+  "categories": [
+    {"key": "impact", "label": "實質影響", "color": "#F5C518", "textColor": "#1b2430"},
+    {"key": "cost",   "label": "成本",     "color": "#3B82F6", "textColor": "#ffffff"}
+  ],
+  "groups": {"count": 5, "max": 8},
+  "labels": {"item": "小組關注點", "collection": "建議關注點", "priority": "優先聚焦"},
+  "itemFields": {"rewritten": true, "maxLength": 150},
+  "voter": {"fields": ["name", "group"]},
+  "phases": [
+    {"type": "collect", "label": "收集小組關注點"},
+    {"type": "merge",   "label": "協力統整"},
+    {"type": "share",   "label": "大組分享共創的建議關注點"},
+    {"type": "vote", "category": "impact", "label": "優先聚焦投票：實質影響"},
+    {"type": "vote", "category": "cost",   "label": "優先聚焦投票：成本"},
+    {"type": "results", "label": "優先聚焦結果"}
+  ],
+  "vote": {"maxPerVoter": 3, "rank": "competition", "priorityTopN": 3,
+           "priorityMinVotes": 1, "hideUntilClose": true, "showOnPhone": false,
+           "question": "下一次 Pre-talk，你最想先問哪一題？"}
+}

@@ -30,12 +30,13 @@ docs/release-notes.md # 每個版本的 release note
 ## 常用指令
 ```bash
 npm install                                   # 只安裝測試用的 dev 依賴
-npx firebase emulators:start --only database,auth
-node --test tests/golden.test.js
-npx firebase emulators:exec --only database,auth "node --test tests/rules.test.js"
+npm run test:golden                           # golden test
+npm run test:rules                            # 權限測試（自動啟動 emulator，需要 Java）
+npm run dev                                   # 本機預覽：emulator＋示範場次 TEST26＋網頁 http://localhost:8000/
+node tools/sim-helpers.js                     # （npm run dev 執行中）模擬 5 位小幫手同時輸入
 npx firebase deploy --only database           # 部署安全規則（要先經 Mike 同意）
-python3 -m http.server 8000                   # 在本機預覽 index.html
 ```
+- 在 localhost 開啟時預設連 emulator；網址加 `?prod`（例如 `http://localhost:8000/?prod#/admin`）才連正式 Firebase。
 
 ## 工作流程
 - 依 `docs/spec.md` B9 的分版開發，**一次一個版本**，每個版本開一個分支（`v0.1`、`v0.2`…）。
@@ -47,7 +48,22 @@ python3 -m http.server 8000                   # 在本機預覽 index.html
 - 刪除檔案、強制推送、更動 Firebase 專案設定之前，一律先問 Mike。
 
 ## 環境資訊（由 Mike 在設定步驟中提供）
-- Firebase config：（貼在 `app.js` 開頭的 `FIREBASE_CONFIG`；Web API key 本來就公開，不是密鑰）
-- OWNER_UID：（替換 `database.rules.json` 裡的 `OWNER_UID`）
-- GitHub Pages 網址：`https://<帳號>.github.io/concern-board/`
+- Firebase 專案：`concern-board`（Realtime Database 在 asia-southeast1：`https://concern-board-default-rtdb.asia-southeast1.firebasedatabase.app`）
+- Firebase config：已貼在 `app.js` 開頭的 `FIREBASE_CONFIG`（Web API key 本來就公開，不是密鑰）
+  ```js
+  {
+    apiKey: "AIzaSyAE0B9DeyIRA4FhZxc_SoHXb_f_EjtVcr0",
+    authDomain: "concern-board.firebaseapp.com",
+    databaseURL: "https://concern-board-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "concern-board",
+    storageBucket: "concern-board.firebasestorage.app",
+    messagingSenderId: "959094466354",
+    appId: "1:959094466354:web:3f9c1acd6ebb775c45192b"
+  }
+  ```
+- OWNER_UID：`BkEeFSDkL9YW98rv5qxFTgG06Lu1`（已替換進 `database.rules.json`）
+- GitHub repo：`https://github.com/mikelai70/concern-board/`
+- GitHub Pages 網址：`https://mikelai70.github.io/concern-board/`（需在 repo 的 Settings → Pages 開啟，來源選 main 分支根目錄）
+- 本機開發環境（2026/11/20）：Node.js 26 LTS、Java 21（Temurin，emulator 需要）、firebase-tools 裝在專案的 devDependencies，用 `npx firebase` 執行
+- 注意：資料庫網址不是 `*.firebaseio.com`，而是 `*.asia-southeast1.firebasedatabase.app`（Firebase 新區域的網域）。公司網路需確認這個網域也能連線
 - 公司網路已驗證（2026/11/19）：github.io、gstatic、firebaseio、googleapis、cdn.sheetjs.com 都能連線，即時連線也正常

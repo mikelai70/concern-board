@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>關注點共編投票</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1b2430; --muted: #5b6573; --line: #d9dde3;
+    --accent: #1f5fbf; --ok: #1a8f4c; --warn: #b45309; --err: #c0262d;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; font-size: 16px; line-height: 1.5; }
+  #app { max-width: 960px; margin: 0 auto; padding: 16px; }
+  #app.wide { max-width: none; padding: 24px 32px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 20px 0 8px; }
+  .sub { color: var(--muted); font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin: 12px 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1 1 auto; }
+  label.field { display: block; margin: 10px 0; }
+  label.field > span { display: block; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+  input[type=text], input[type=number], input[type=password], select, textarea {
+    font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); width: 100%; }
+  textarea { resize: vertical; min-height: 64px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--err); border-color: #efc2c4; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.big { width: 100%; padding: 14px; font-size: 18px; margin: 6px 0; }
+  .msg { padding: 8px 12px; border-radius: 8px; margin: 8px 0; font-size: 14px; }
+  .msg.err { background: #fdecec; color: var(--err); }
+  .msg.ok { background: #e8f6ee; color: var(--ok); }
+  .msg.info { background: #eaf1fb; color: var(--accent); }
+  .msg.warn { background: #fff4e5; color: var(--warn); }
+  .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+  .dot { font-size: 13px; white-space: nowrap; }
+  .dot::before { content: "●"; margin-right: 4px; }
+  .dot.on::before { color: var(--ok); } .dot.off::before { color: var(--err); }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; border: 1px solid transparent; }
+  .item { border: 1px solid var(--line); border-left-width: 6px; border-radius: 8px; padding: 10px 12px; margin: 10px 0; background: #fff; }
+  .item .meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 6px; font-size: 14px; }
+  .item .state { margin-left: auto; font-size: 13px; color: var(--muted); }
+  .item .state.err { color: var(--err); } .item .state.ok { color: var(--ok); }
+  .catpick label { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); cursor: pointer; }
+  .catpick input { margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: middle; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .readonly .item { opacity: .9; }
+  details summary { cursor: pointer; color: var(--muted); }
+  code.code { font-size: 18px; letter-spacing: 2px; font-weight: 700; }
+
+  /* 投影畫面：以 1920×1080 為準 */
+  body.screen { background: #10161f; color: #f2f4f7; min-height: 100vh; }
+  body.screen #app { max-width: none; padding: 28px 36px; }
+  .scr-head { display: flex; justify-content: space-between; align-items: baseline; gap: 24px; margin-bottom: 18px; }
+  .scr-title { font-size: 40px; font-weight: 700; margin: 0; }
+  .scr-phase { font-size: 26px; color: #b7c0cc; }
+  .scr-tools { display: flex; gap: 8px; }
+  .scr-tools button { background: transparent; color: #b7c0cc; border-color: #3a4554; font-size: 16px; padding: 6px 12px; }
+  .scr-tools button.on { background: #2b3644; color: #fff; }
+  .scr-cols { display: grid; gap: 20px; align-items: start; }
+  .scr-col h3 { font-size: 28px; margin: 0 0 10px; padding: 8px 14px; border-radius: 10px; background: #1d2632; }
+  .scr-card { background: #1d2632; border-left: 10px solid #888; border-radius: 10px; padding: 14px 16px; margin: 0 0 12px; font-size: 26px; line-height: 1.4; }
+  .scr-card .chip { font-size: 18px; margin-right: 8px; vertical-align: middle; }
+  .scr-card .g { display: block; font-size: 18px; color: #9aa5b3; margin-top: 4px; }
+  .scr-empty { color: #6b7685; font-size: 22px; }
+  .scr-foot { margin-top: 16px; font-size: 18px; color: #9aa5b3; }
+  @media (max-width: 600px) { #app { padding: 12px; } h1 { font-size: 20px; } }
+</style>
+</head>
+<body>
+<div id="app"><p class="sub">載入中…</p></div>
+<noscript>這個工具需要開啟 JavaScript。</noscript>
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+{
+  "rules": {
+    "sessions": {
+      ".read": "auth != null && auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1'",
+      "$code": {
+        ".read": "auth != null && (auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1' || data.child('meta/visibility').val() === 'live' || data.child('meta/visibility').val() === 'demo')",
+        ".write": "auth != null && auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1'",
+        "meta": {
+          ".write": "auth != null && auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1'",
+          "visibility": { ".validate": "newData.val() === 'private' || newData.val() === 'live' || newData.val() === 'demo'" },
+          "groupCount": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 8" },
+          "phase": {
+            ".write": "auth != null && (auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
+          }
+        },
+        "items": {
+          "$id": {
+            ".write": "auth != null && (auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('secrets/'+$code+'/helperPin').exists() && root.child('access/'+$code+'/helpers/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/helperPin').val() && (root.child('sessions/'+$code+'/meta/phase/type').val() === 'merge' || (root.child('sessions/'+$code+'/meta/phase/type').val() === 'collect' && (!data.exists() || data.child('groups/'+root.child('access/'+$code+'/helpers/'+auth.uid+'/group').val()).exists()) && (!newData.exists() || newData.child('groups/'+root.child('access/'+$code+'/helpers/'+auth.uid+'/group').val()).exists())))))",
+            "text": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 150" }
+          }
+        },
+        "votes": {
+          "$cat": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'vote' && root.child('sessions/'+$code+'/meta/phase/category').val() === $cat",
+              ".validate": "newData.hasChildren(['name','group','ts'])",
+              "v1": { ".validate": "auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1' || (root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
+              "v2": { ".validate": "auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1' || (newData.val() !== newData.parent().child('v1').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
+              "v3": { ".validate": "auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1' || (newData.val() !== newData.parent().child('v1').val() && newData.val() !== newData.parent().child('v2').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
+              "name":  { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30" },
+              "group": { ".validate": "newData.isNumber()" },
+              "ts":    { ".validate": "auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1' || newData.val() === now" },
+              "$other": { ".validate": false }
+            }
+          }
+        },
+        "participants": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('sessions/'+$code+'/meta/visibility').val() === 'live'"
+          }
+        }
+      }
+    },
+    "access": {
+      "$code": {
+        ".write": "auth != null && auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1'",
+        "helpers": { "$uid": {
+          ".read": "auth != null && (auth.uid === $uid || auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1')",
+          ".write": "auth != null && (auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1' || (auth.uid === $uid && root.child('secrets/'+$code+'/helperPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/helperPin').val()))"
+        }},
+        "hosts": { "$uid": {
+          ".read": "auth != null && (auth.uid === $uid || auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1')",
+          ".write": "auth != null && (auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1' || (auth.uid === $uid && root.child('secrets/'+$code+'/hostPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
+        }}
+      }
+    },
+    "secrets": {
+      "$code": { ".read": false, ".write": "auth != null && auth.uid === 'BkEeFSDkL9YW98rv5qxFTgG06Lu1'" }
+    }
+  }
+}
