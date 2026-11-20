@@ -9,8 +9,23 @@ const NS = `${PROJECT}-default-rtdb`;
 const OWNER = 'BkEeFSDkL9YW98rv5qxFTgG06Lu1';
 const config = JSON.parse(readFileSync(new URL('../config/templates/prmc-workshop.json', import.meta.url), 'utf8'));
 
-const emu = spawn('npx', ['firebase', 'emulators:start', '--only', 'database,auth', '--project', PROJECT], { stdio: ['ignore', 'pipe', 'inherit'], shell: true });
+// 先確認需要的連接埠都沒有被占用（最常見的原因：另一個視窗已經在執行 npm run dev）
+import { createServer } from 'node:net';
+const portFree = (port) => new Promise((ok) => {
+  const s = createServer().once('error', () => ok(false)).once('listening', () => s.close(() => ok(true))).listen(port, '127.0.0.1');
+});
+const busy = [];
+for (const [port, what] of [[8000, '網頁'], [9000, '模擬資料庫'], [9099, '模擬登入']]) if (!(await portFree(port))) busy.push(`${port}（${what}）`);
+if (busy.length) {
+  console.log(`\n無法啟動：連接埠 ${busy.join('、')} 已經被占用。`);
+  console.log('通常是另一個視窗已經在執行 npm run dev——如果是，直接打開 http://localhost:8000/ 就可以用了。');
+  console.log('如果要重新啟動，請先到那個視窗按 Ctrl+C 結束，再執行一次 npm run dev。\n');
+  process.exit(1);
+}
+
+const emu = spawn(`npx firebase emulators:start --only database,auth --project ${PROJECT}`, { stdio: ['ignore', 'pipe', 'inherit'], shell: true });
 emu.stdout.on('data', (d) => { const s = String(d); if (/error|錯誤/i.test(s)) process.stdout.write(s); });
+emu.on('exit', (code) => { if (code) { console.log(`\nemulator 意外結束（代碼 ${code}），請把上面的訊息貼給 Claude。`); process.exit(1); } });
 const stop = () => { try { emu.kill(); } catch { /* ignore */ } process.exit(0); };
 process.on('SIGINT', stop); process.on('SIGTERM', stop);
 
@@ -48,5 +63,5 @@ await put('secrets/TEST26', { helperPin: '111111', hostPin: '222222' });
 
 await startServer(8000);
 console.log('示範場次代碼：TEST26（小幫手 PIN 111111、主持人 PIN 222222）');
-console.log('擁有者管理：http://localhost:8000/#/admin（在跳出的視窗選「擁有者（測試）」）');
+console.log('擁有者管理：http://localhost:8000/#/admin（按「用 Google 登入」會直接登入測試擁有者）');
 console.log('按 Ctrl+C 結束。');
