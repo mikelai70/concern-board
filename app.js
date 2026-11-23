@@ -7,6 +7,8 @@ import {
   getDatabase, ref, onValue, get, set, update, push, serverTimestamp, connectDatabaseEmulator,
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
 import * as L from './logic.js';
+import qrcode from './vendor/qrcode.js'; // qrcode-generator 2.0.4，MIT（T21、T26）
+const SHEETJS_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs'; // B2：固定 0.20.3
 
 // ---------- Firebase 設定（Web API key 本來就公開，不是密鑰） ----------
 export const FIREBASE_CONFIG = {
@@ -77,6 +79,25 @@ function download(filename, text, type = 'application/json') {
   const a = h('a', { href: url, download: filename });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+/** B7：匯出 XLSX（四張工作表的內容由 logic.js 產生；SheetJS 只在按下時才載入） */
+async function exportXlsx(code, data) {
+  const XLSX = await import(SHEETJS_URL);
+  const now = Date.now();
+  const wb = XLSX.utils.book_new();
+  for (const { name, rows } of L.buildXlsxSheets({ code, ...data }, now)) {
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = rows[0].map((_, i) => ({ wch: Math.min(60, Math.max(8, ...rows.map((r) => [...String(r[i] ?? '')].length * 2))) }));
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  }
+  XLSX.writeFile(wb, L.exportFileName(data.meta && data.meta.title, code, now, 'xlsx'));
+}
+function exportButtons(code, getData) {
+  const err = h('span', { class: 'sub' });
+  return h('div', { class: 'row' },
+    h('button', { onclick: () => exportSession(code, getData()) }, '匯出 JSON'),
+    h('button', { onclick: () => { err.textContent = ''; exportXlsx(code, getData()).catch((e) => { err.textContent = `XLSX 匯出失敗：${e.message}`; }); } }, '匯出 XLSX'),
+    err);
 }
 function exportSession(code, data) {
   const json = L.toExportJson({ code, ...data });
@@ -607,9 +628,15 @@ async function viewHost(code) {
         h('div', { class: 'row' },
           h('button', { disabled: !prev, onclick: () => go(prev, labelOf(prev)) }, prev ? `◀ 回到「${labelOf(prev)}」` : '◀ 已是第一個階段'),
           h('button', { class: 'primary', disabled: !next, onclick: () => go(next, labelOf(next)) }, next ? `前往「${labelOf(next)}」 ▶` : '已是最後一個階段')),
-        next && next.type === 'vote' ? h('p', { class: 'sub' }, '投票畫面在 v0.3 加入；目前切到投票階段時，參與者只會看到等待畫面。') : null,
+        h('p', { class: 'sub' }, '切到投票階段就開始投票，切到下一個階段就結束（T29）。'),
         h('div', { class: 'row' },
           h('button', { onclick: () => window.open(`#/s/${code}/screen`, `screen-${code}`) }, '開啟投影畫面'))),
+      h('div', { class: 'card' }, h('h2', {}, '投票人數'),
+        h('table', {},
+          h('thead', {}, h('tr', {}, cats.map((c) => h('th', { class: 'num' }, c.label)))),
+          h('tbody', {}, h('tr', {}, cats.map((c) => h('td', { class: 'num' }, L.voterCount((s.votes || {})[c.key])))))),
+        h('p', { class: 'sub' }, '投票期間只顯示人數，票數到結果階段才在投影畫面公布。')),
+      h('div', { class: 'card' }, h('h2', {}, '匯出'), exportButtons(code, () => s)),
       h('div', { class: 'card' }, h('h2', {}, '各組題數'),
         h('table', {},
           h('thead', {}, h('tr', {}, h('th', {}, '組別'), cats.map((c) => h('th', { class: 'num' }, c.label)), h('th', { class: 'num' }, '合計'))),
@@ -627,19 +654,83 @@ async function viewHost(code) {
 function viewParticipant(code) {
   const role = store.get(roleKey(code));
   if (!role || role.role !== 'participant') { location.hash = `#/s/${code}`; return; }
+  const uid = auth.currentUser.uid;
   const body = h('div');
   mount(h('div', { class: 'topbar' }, h('div', {}, h('h1', {}, `${role.name}（第 ${role.group} 組）`)), connDot()), body);
-  watchSession(code, (s) => {
-    const type = s.meta.phase && s.meta.phase.type;
-    body.replaceChildren(h('div', { class: 'card' },
-      h('h2', {}, s.meta.title),
-      h('p', {}, `目前階段：${phaseLabel(s.meta)}`),
-      type === 'results' ? h('p', {}, '感謝參與！') : h('p', {}, '請稍候，投票開始時這個畫面會自動切換。'),
-      type === 'vote' ? msg('info', '投票功能在 v0.3 加入。') : null));
-  }, (kind) => sessionError(code, kind));
+  let picked = null; // 目前勾選（null＝還沒動過，沿用已送出的選票）
+  let pickedCat = null;
+  let note = null; // 送出結果訊息
+  let last = null;
+
+  async function submit(cat, ids) {
+    const r = L.validateBallot(last.meta.config, last.items || {}, cat, ids);
+    if (!r.ok) { note = msg('err', r.error); paint(); return; }
+    try {
+      await set(ref(db, `sessions/${code}/votes/${cat}/${uid}`), { name: role.name, group: Number(role.group), ...r.ballot, ts: serverTimestamp() });
+      picked = null; note = msg('ok', '已送出！投票期間可以改票，以最後送出的為準。');
+    } catch (e) {
+      note = msg('err', isPermissionDenied(e) ? '送出失敗：這一段投票已經結束，或還沒開始。' : `送出失敗：${e.message}`);
+    }
+    paint();
+  }
+
+  function paint() {
+    if (!last) return;
+    const s = last;
+    const cfg = s.meta.config;
+    const p = s.meta.phase || {};
+    if (p.type !== 'vote') {
+      picked = null; note = null;
+      body.replaceChildren(h('div', { class: 'card' },
+        h('h2', {}, s.meta.title),
+        h('p', {}, `目前階段：${phaseLabel(s.meta)}`),
+        p.type === 'results' ? h('p', { class: 'big-thanks' }, '感謝參與！結果請看投影畫面。') : h('p', {}, '請稍候，投票開始時這個畫面會自動切換。')));
+      return;
+    }
+    const cat = p.category;
+    if (pickedCat !== cat) { picked = null; note = null; pickedCat = cat; }
+    const c = catOf(cfg, cat);
+    const items = s.items || {};
+    const list = L.itemsByCategory(items, cfg.categories).find((g) => g.cat === cat).items;
+    const mine = s.votes && s.votes[cat] && s.votes[cat][uid];
+    const saved = L.ballotIds(mine);
+    const sel = picked || saved;
+    const max = L.maxVotes(cfg, items, cat);
+    const dirty = picked !== null && JSON.stringify(picked) !== JSON.stringify(saved);
+    const toggle = (id) => {
+      const cur = [...sel];
+      const i = cur.indexOf(id);
+      if (i >= 0) cur.splice(i, 1); else if (cur.length < max) cur.push(id); else return;
+      picked = cur; note = null; paint();
+    };
+    body.replaceChildren(...[
+      h('div', { class: 'card' },
+        h('div', { class: 'row' }, catChip(c), h('span', { class: 'sub' }, phaseLabel(s.meta))),
+        h('h2', {}, cfg.vote.question || '請選出你最想優先討論的題目'),
+        h('p', { class: 'sub' }, `最多選 ${max} 題，不必選滿。已選 ${sel.length} 題。`)),
+      h('div', { class: 'vote-list' }, list.map((it) => {
+        const on = sel.includes(it.id);
+        const full = !on && sel.length >= max;
+        return h('button', { class: `vote-item${on ? ' on' : ''}`, disabled: full, style: { borderLeftColor: c.color }, onclick: () => toggle(it.id) },
+          h('span', { class: 'box' }, on ? '✓' : ''), h('span', { class: 'grow' }, it.text));
+      })),
+      note,
+      h('div', { class: 'vote-bar' },
+        h('span', { class: 'sub grow' }, mine ? (dirty ? '選擇已變更，尚未送出' : '已送出，可以改票') : '還沒送出'),
+        h('button', { class: 'primary', disabled: sel.length === 0 || (Boolean(mine) && !dirty), onclick: () => submit(cat, sel) }, mine ? '送出修改' : '送出'))].filter(Boolean));
+  }
+  watchSession(code, (s) => { last = s; paint(); }, (kind) => sessionError(code, kind));
 }
 
 // ---------- 投影畫面 ----------
+function qrSvg(text) {
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  return qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
+}
+function joinUrl(code) { return `${location.origin}${location.pathname}#/s/${code}`; }
+
 function viewScreen(code) {
   document.body.classList.add('screen');
   let mode = 'auto'; // auto | group | category
@@ -648,8 +739,10 @@ function viewScreen(code) {
   const btns = { auto: '自動', group: '依組別', category: '依分類' };
   const tools = h('div', { class: 'scr-tools' }, Object.entries(btns).map(([k, v]) =>
     h('button', { 'data-mode': k, onclick: () => { mode = k; paint(); } }, v)));
-  const cols = h('div', { class: 'scr-cols' }); const foot = h('div', { class: 'scr-foot' });
-  mount(h('div', { class: 'scr-head' }, h('div', {}, title, phase), tools), cols, foot);
+  const main = h('div'); const foot = h('div', { class: 'scr-foot' });
+  mount(h('div', { class: 'scr-head' }, h('div', {}, title, phase), tools), main, foot);
+  const qrBox = h('div', { class: 'scr-qr' });
+  qrBox.innerHTML = qrSvg(joinUrl(code)); // 只含場次網址，由內嵌套件產生（T26、T27）
 
   function card(cfg, it, showGroup) {
     const c = catOf(cfg, it.cat);
@@ -657,32 +750,69 @@ function viewScreen(code) {
       showGroup ? null : catChip(c), it.text,
       showGroup ? h('span', { class: 'g' }, L.groupLabel(it.groups)) : null);
   }
+  function columns(cols) {
+    const grid = h('div', { class: 'scr-cols' });
+    grid.style.gridTemplateColumns = `repeat(${cols.length}, minmax(0, 1fr))`;
+    grid.append(...cols);
+    return grid;
+  }
   function paint() {
     if (!last) return;
     const { meta } = last;
     const items = last.items || {};
+    const votes = last.votes || {};
     const cfg = meta.config;
-    const type = meta.phase && meta.phase.type;
-    const eff = mode !== 'auto' ? mode : (type === 'merge' ? 'category' : 'group');
-    tools.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+    const p = meta.phase || {};
     title.textContent = meta.title;
     phase.textContent = phaseLabel(meta);
+    tools.hidden = p.type === 'vote' || p.type === 'results';
+    const total = Object.values(items).filter((it) => it.status === 'active').length;
+    foot.textContent = `場次代碼 ${code}｜共 ${total} 題`;
+
+    if (p.type === 'vote') { // A5：題目＋已投票人數（不顯示票數）＋QR code（T27）
+      const c = catOf(cfg, p.category);
+      const list = L.itemsByCategory(items, cfg.categories).find((g) => g.cat === p.category).items;
+      main.replaceChildren(h('div', { class: 'scr-vote' },
+        h('div', {},
+          h('h3', { class: 'scr-vote-h', style: { background: c.color, color: c.textColor } }, `${c.label}（${list.length} 題）`),
+          h('p', { class: 'scr-question' }, cfg.vote.question || ''),
+          h('div', { class: 'scr-vote-items' }, list.map((it) => card(cfg, it, true)))),
+        h('div', { class: 'scr-side' },
+          h('div', { class: 'scr-count' }, h('span', { class: 'n' }, String(L.voterCount(votes[p.category]))), h('span', {}, '人已投票')),
+          qrBox,
+          h('div', { class: 'scr-code' }, '掃描加入，或輸入場次代碼'),
+          h('div', { class: 'scr-code big' }, code))));
+      return;
+    }
+    if (p.type === 'results') { // R2～R5、T28：兩類各自排名、並排
+      main.replaceChildren(columns(cfg.categories.map((c) => {
+        const rows = L.tally(items, votes[c.key], c.key, cfg.vote);
+        return h('div', { class: 'scr-col' },
+          h('h3', { style: { background: c.color, color: c.textColor } }, `${c.label}（${L.voterCount(votes[c.key])} 人投票）`),
+          rows.length ? rows.map((r) => h('div', { class: `scr-res${r.priority ? ' pri' : ''}`, style: { borderLeftColor: c.color } },
+            h('span', { class: 'rank' }, String(r.rank)),
+            h('span', { class: 'txt' }, r.text, h('span', { class: 'g' }, L.groupLabel(r.groups))),
+            h('span', { class: 'num' }, L.pctText(r.pct), h('small', {}, `（${r.votes} 票）`)),
+            r.priority ? h('span', { class: 'pri-tag' }, `★ ${(cfg.labels && cfg.labels.priority) || '優先聚焦'}`) : null))
+            : h('div', { class: 'scr-empty' }, '（沒有題目）'));
+      })));
+      return;
+    }
+    const eff = mode !== 'auto' ? mode : (p.type === 'merge' ? 'category' : 'group');
+    tools.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
     if (eff === 'group') {
       const groups = L.itemsByGroup(items, meta.groupCount);
-      cols.style.gridTemplateColumns = `repeat(${Math.min(groups.length, 4)}, minmax(0, 1fr))`;
-      cols.replaceChildren(...groups.map((g) => h('div', { class: 'scr-col' }, h('h3', {}, `第 ${g.group} 組`),
+      const grid = columns(groups.map((g) => h('div', { class: 'scr-col' }, h('h3', {}, `第 ${g.group} 組`),
         g.items.length ? g.items.map((it) => card(cfg, it, false)) : h('div', { class: 'scr-empty' }, '（尚無題目）'))));
+      grid.style.gridTemplateColumns = `repeat(${Math.min(groups.length, 4)}, minmax(0, 1fr))`;
+      main.replaceChildren(grid);
     } else {
-      const byCat = L.itemsByCategory(items, cfg.categories);
-      cols.style.gridTemplateColumns = `repeat(${byCat.length}, minmax(0, 1fr))`;
-      cols.replaceChildren(...byCat.map((g) => {
+      main.replaceChildren(columns(L.itemsByCategory(items, cfg.categories).map((g) => {
         const c = catOf(cfg, g.cat);
         return h('div', { class: 'scr-col' }, h('h3', { style: { background: c.color, color: c.textColor } }, `${c.label}（${g.items.length}）`),
           g.items.length ? g.items.map((it) => card(cfg, it, true)) : h('div', { class: 'scr-empty' }, '（尚無題目）'));
-      }));
+      })));
     }
-    const total = Object.values(items).filter((it) => it.status === 'active').length;
-    foot.textContent = `場次代碼 ${code}｜共 ${total} 題`;
   }
   watchSession(code, (s) => { last = s; paint(); }, (kind) => { document.body.classList.remove('screen'); sessionError(code, kind); });
 }
@@ -838,7 +968,7 @@ function viewAdmin() {
           h('td', {}, phaseLabel(m)), h('td', { class: 'num' }, active), h('td', { class: 'num' }, Object.keys(s.participants || {}).length),
           h('td', {}, h('div', { class: 'row' },
             h('button', { onclick: () => pinDialog(code) }, '設定 PIN'),
-            h('button', { onclick: () => exportSession(code, s) }, '匯出 JSON'),
+            exportButtons(code, () => s),
             h('a', { href: `#/s/${code}`, target: '_blank' }, '開啟'),
             h('a', { href: `#/s/${code}/screen`, target: '_blank' }, '投影'))));
       }))));

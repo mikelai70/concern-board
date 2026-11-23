@@ -7,6 +7,7 @@ import {
   toExportJson, fromImportJson, nextPhase, dupNameWarnings, normalizeItemText,
   isValidPin, canHelperEdit, validateGroupCount, generateCode, isValidCode, isDuplicateName,
   canMerge, deleteItem, splitItem, helperActions, toPathUpdates, groupLabel,
+  validateBallot, ballotIds, voterCount, buildXlsxSheets,
 } from '../logic.js';
 
 const config = JSON.parse(readFileSync(new URL('../config/templates/prmc-workshop.json', import.meta.url), 'utf8'));
@@ -207,6 +208,51 @@ test('toPathUpdates：只寫有變的欄位', () => {
   assert.equal(u.M.text, '甲');
   const un = toPathUpdates({ A: { text: '甲', status: 'merged', mergedInto: 'M' }, M: { sources: { A: true } } }, { A: { text: '甲', status: 'active' }, M: null });
   assert.deepEqual(un, { 'A/status': 'active', 'A/mergedInto': null, M: null });
+});
+
+test('G14：選票檢查（R1）', () => {
+  const items = {
+    A: { text: '甲', cat: 'impact', groups: { 1: true }, status: 'active' },
+    B: { text: '乙', cat: 'impact', groups: { 2: true }, status: 'active' },
+    C: { text: '丙', cat: 'cost', groups: { 1: true }, status: 'active' },
+    M: { text: '舊', cat: 'impact', groups: { 1: true }, status: 'merged', mergedInto: 'A' },
+  };
+  assert.equal(validateBallot(config, items, 'impact', ['A', 'B', 'C']).ok, false, '只有 2 題時不能選 3 題');
+  assert.equal(validateBallot(config, items, 'impact', []).ok, false, '至少 1 題');
+  assert.equal(validateBallot(config, items, 'impact', ['A', 'A']).ok, false, '不能重複');
+  assert.equal(validateBallot(config, items, 'impact', ['C']).ok, false, '別類');
+  assert.equal(validateBallot(config, items, 'impact', ['M']).ok, false, '已合併');
+  assert.deepEqual(validateBallot(config, items, 'impact', ['B']).ballot, { v1: 'B' });
+  assert.deepEqual(validateBallot(config, items, 'impact', ['B', 'A']).ballot, { v1: 'B', v2: 'A' });
+  assert.deepEqual(ballotIds({ v1: 'B', v2: 'A', name: 'x' }), ['B', 'A']);
+  assert.equal(voterCount({ u1: {}, u2: {} }), 2);
+  assert.equal(voterCount(undefined), 0);
+});
+
+test('G15：XLSX 四張工作表', () => {
+  const items = {
+    A: { text: '甲', cat: 'impact', groups: { 1: true }, rewritten: false, status: 'merged', mergedInto: 'M' },
+    B: { text: '乙', cat: 'impact', groups: { 3: true }, rewritten: false, status: 'merged', mergedInto: 'M' },
+    M: { text: '甲乙', cat: 'impact', groups: { 1: true, 3: true }, rewritten: true, status: 'active', sources: { A: true, B: true } },
+    C: { text: '丙', cat: 'impact', groups: { 2: true }, rewritten: false, status: 'active' },
+    D: { text: '丁', cat: 'cost', groups: { 2: true }, rewritten: false, status: 'active' },
+  };
+  const votes = { impact: { u1: { name: '小明', group: 2, v1: 'M', v2: 'C', ts: 1765436823000 }, u2: { name: '小華', group: 1, v1: 'M', ts: 1765436824000 } } };
+  const sheets = buildXlsxSheets({ code: 'ABC234', meta: { title: '測試', templateId: 'prmc-workshop', config, phase: { index: 5, type: 'results' } }, items, votes, participants: {} }, 1765436900000);
+  assert.deepEqual(sheets.map((s) => s.name), ['建議關注點', '合併紀錄', '投票明細', '場次資訊']);
+  const [summary, merges, detail, info] = sheets.map((s) => s.rows);
+  assert.deepEqual(summary[0], ['分類', '題目', '組別', '已改寫', '票數', '占比', '名次', '優先聚焦']);
+  assert.deepEqual(summary[1], ['實質影響', '甲乙', '第 1、3 組', '是', 2, '67%', 1, '是']);
+  assert.deepEqual(summary[2], ['實質影響', '丙', '第 2 組', '否', 1, '33%', 2, '是']);
+  assert.deepEqual(summary[3], ['成本', '丁', '第 2 組', '否', 0, '—', 1, ''], '總票數 0：占比「—」、不是優先聚焦');
+  assert.equal(merges.length, 3, '標題＋每個來源一列');
+  assert.deepEqual(merges[1], ['甲乙', '甲', '第 1 組']);
+  assert.deepEqual(detail[0], ['分類', '姓名', '組別', '所投題目 1', '所投題目 2', '所投題目 3', '時間']);
+  assert.deepEqual(detail[1].slice(0, 6), ['實質影響', '小華', 1, '甲乙', '', ''], '依組別排序');
+  assert.match(detail[1][6], /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.deepEqual(info.find((r) => r[0] === '階段'), ['階段', '優先聚焦結果']);
+  assert.deepEqual(info.find((r) => r[0] === '投票人數：實質影響'), ['投票人數：實質影響', 2]);
+  assert.deepEqual(info.find((r) => r[0] === '投票人數（不重複）'), ['投票人數（不重複）', 2]);
 });
 
 test('匯入：版本比程式新、或不是本工具的檔案 → 拒絕', () => {

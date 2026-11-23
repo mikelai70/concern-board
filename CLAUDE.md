@@ -5,7 +5,7 @@
 **唯一的規格來源：`docs/spec.md`**（關注點共編投票工具_規格_v1.0）。動手前先讀 Part B。
 
 ## 鐵則
-1. **決策紀錄 T1～T25、R1～R6 不得自行重新詮釋。** 發現規格有問題時，停下來向 Mike 說明並提出建議，經同意後先改 `docs/spec.md` 的決策紀錄，再改程式。
+1. **決策紀錄 T1～T29、R1～R6 不得自行重新詮釋。** 發現規格有問題時，停下來向 Mike 說明並提出建議，經同意後先改 `docs/spec.md` 的決策紀錄，再改程式。
 2. 業務規則只能寫在 `logic.js`（純函式），畫面只能呼叫它。
 3. PIN 不能出現在任何能被讀到的路徑，也不能存進 localStorage。JSON 匯出不包含 `access` 和 `secrets`。
 4. 不新增外部網域。只能使用：gstatic（Firebase SDK 10.12.0）、cdn.sheetjs.com（0.20.3）、`*.firebaseio.com`、googleapis。QR code 套件要內嵌。
@@ -21,7 +21,8 @@ vendor/qrcode.js      # 內嵌的 QR code 套件
 config/templates/prmc-workshop.json
 database.rules.json   # 安全規則；OWNER_UID 由 Mike 提供
 firebase.json, .firebaserc
-tests/golden.test.js  # G1～G9
+tests/golden.test.js  # G1～G15
+tools/                # dev.js（本機練習環境）、serve.js、sim-helpers.js、sim-voters.js
 tests/rules.test.js   # 權限測試（emulator）
 docs/spec.md          # 規格
 docs/release-notes.md # 每個版本的 release note
@@ -34,6 +35,7 @@ npm run test:golden                           # golden test
 npm run test:rules                            # 權限測試（自動啟動 emulator，需要 Java）
 npm run dev                                   # 本機預覽：emulator＋示範場次 TEST26＋網頁 http://localhost:8000/
 node tools/sim-helpers.js                     # （npm run dev 執行中）模擬 5 位小幫手同時輸入
+node tools/sim-voters.js                      # （npm run dev 執行中）模擬 30 人投票，比對 G1、G2
 npx firebase deploy --only database           # 部署安全規則（要先經 Mike 同意）
 ```
 - 給 Mike 的本機練習步驟（帳號、PIN、要檢查的畫面、常見問題）寫在 `README.md`；改動 `tools/dev.js` 時一併更新。
