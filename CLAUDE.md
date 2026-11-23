@@ -5,7 +5,7 @@
 **唯一的規格來源：`docs/spec.md`**（關注點共編投票工具_規格_v1.0）。動手前先讀 Part B。
 
 ## 鐵則
-1. **決策紀錄 T1～T25、R1～R6 不得自行重新詮釋。** 發現規格有問題時，停下來向 Mike 說明並提出建議，經同意後先改 `docs/spec.md` 的決策紀錄，再改程式。
+1. **決策紀錄 T1～T29、R1～R6 不得自行重新詮釋。** 發現規格有問題時，停下來向 Mike 說明並提出建議，經同意後先改 `docs/spec.md` 的決策紀錄，再改程式。
 2. 業務規則只能寫在 `logic.js`（純函式），畫面只能呼叫它。
 3. PIN 不能出現在任何能被讀到的路徑，也不能存進 localStorage。JSON 匯出不包含 `access` 和 `secrets`。
 4. 不新增外部網域。只能使用：gstatic（Firebase SDK 10.12.0）、cdn.sheetjs.com（0.20.3）、`*.firebaseio.com`、googleapis。QR code 套件要內嵌。
