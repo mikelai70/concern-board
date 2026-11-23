@@ -223,6 +223,63 @@ test('投票：時間不是伺服器時間失敗', async () => {
   await assertFails(as('p1').ref('sessions/LIVE01/votes/impact/p1').set({ name: 'Mike', group: 2, ts: 123, v1: 'a1' }));
 });
 
+// ---------- T30：主持人在結果階段調整選票 ----------
+const RESULTS = { index: 5, type: 'results' };
+async function seedVotes(phase) {
+  await seed({ phase });
+  await env.withSecurityRulesDisabled((ctx) => ctx.database().ref('sessions/LIVE01/votes/impact').set({
+    p1: { name: 'Mike', group: 2, v1: 'a1', ts: 1700000000000 },
+    p2: { name: 'Mike', group: 2, v1: 'b2', ts: 1700000000001 },
+  }));
+}
+const logEntry = (by, extra) => ({ action: 'edit', cat: 'impact', voterId: 'p1', by, at: { '.sv': 'timestamp' }, ...extra });
+const now = { '.sv': 'timestamp' };
+
+test('T30：主持人在結果階段可以修改、刪除、代投選票，並寫入紀錄', async () => {
+  await seedVotes(RESULTS);
+  const h = as('host1');
+  await assertSucceeds(h.ref('sessions/LIVE01').update({
+    'votes/impact/p1': { name: 'Mike', group: 2, v1: 'b2', ts: 1700000000000, hostEdited: true, editedAt: now },
+    'voteLog/l1': logEntry('host1', { before: { v1: 'a1' }, after: { v1: 'b2' } }),
+  }));
+  await assertSucceeds(h.ref('sessions/LIVE01').update({
+    'votes/impact/p2': null,
+    'voteLog/l2': logEntry('host1', { action: 'delete', voterId: 'p2', before: { v1: 'b2' } }),
+  }));
+  await assertSucceeds(h.ref('sessions/LIVE01').update({
+    'votes/impact/host-x1': { name: '代投者', group: 3, v1: 'a1', ts: now, hostEdited: true, editedAt: now },
+    'voteLog/l3': logEntry('host1', { action: 'add', voterId: 'host-x1', after: { v1: 'a1' } }),
+  }));
+});
+test('T30：調整後的選票仍要符合規則（不能投已合併或別類的題目、不能超過 3 題）', async () => {
+  await seedVotes(RESULTS);
+  const h = as('host1');
+  await assertFails(h.ref('sessions/LIVE01/votes/impact/p1').set({ name: 'Mike', group: 2, v1: 'm1', ts: 1700000000000, hostEdited: true, editedAt: now }));
+  await assertFails(h.ref('sessions/LIVE01/votes/impact/p1').set({ name: 'Mike', group: 2, v1: 'c1', ts: 1700000000000, hostEdited: true, editedAt: now }));
+  await assertFails(h.ref('sessions/LIVE01/votes/impact/p1').set({ name: 'Mike', group: 2, v1: 'a1', v2: 'b2', v4: 'a1', ts: 1700000000000, hostEdited: true, editedAt: now }));
+});
+test('T30：投票階段主持人不能調整；小幫手、參與者在結果階段也不能', async () => {
+  await seedVotes({ index: 3, type: 'vote', category: 'impact' });
+  await assertFails(as('host1').ref('sessions/LIVE01/votes/impact/p1').remove());
+  await seedVotes(RESULTS);
+  await assertFails(as('helper1').ref('sessions/LIVE01/votes/impact/p1').remove());
+  await assertFails(as('p1').ref('sessions/LIVE01/votes/impact/p1').set({ name: 'Mike', group: 2, v1: 'b2', ts: now }));
+  await assertFails(as('p1').ref('sessions/LIVE01/voteLog/x').set(logEntry('p1')));
+});
+test('T30：紀錄不能修改、不能刪除，也不能冒名', async () => {
+  await seedVotes(RESULTS);
+  const h = as('host1');
+  await assertSucceeds(h.ref('sessions/LIVE01/voteLog/l1').set(logEntry('host1')));
+  await assertFails(h.ref('sessions/LIVE01/voteLog/l1').set(logEntry('host1', { action: 'delete' })));
+  await assertFails(h.ref('sessions/LIVE01/voteLog/l1').remove());
+  await assertFails(h.ref('sessions/LIVE01/voteLog/l2').set(logEntry('someone-else')));
+});
+test('T30：參與者投票時不能自己標示「主持人修改」', async () => {
+  await seedVotes({ index: 3, type: 'vote', category: 'impact' });
+  await assertFails(as('p9').ref('sessions/LIVE01/votes/impact/p9').set({ name: 'X', group: 1, v1: 'a1', ts: now, hostEdited: true }));
+  await assertSucceeds(as('p9').ref('sessions/LIVE01/votes/impact/p9').set({ name: 'X', group: 1, v1: 'a1', ts: now }));
+});
+
 // ---------- 擁有者 ----------
 test('擁有者：可以建立、匯入（含舊選票）、刪除整個場次，設定 PIN 與可見性', async () => {
   const o = as(OWNER);

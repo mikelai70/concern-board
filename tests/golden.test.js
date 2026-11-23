@@ -7,7 +7,7 @@ import {
   toExportJson, fromImportJson, nextPhase, dupNameWarnings, normalizeItemText,
   isValidPin, canHelperEdit, validateGroupCount, generateCode, isValidCode, isDuplicateName,
   canMerge, deleteItem, splitItem, helperActions, toPathUpdates, groupLabel,
-  validateBallot, ballotIds, voterCount, buildXlsxSheets,
+  validateBallot, ballotIds, voterCount, buildXlsxSheets, percentShares, pctText, planBallotAdjust, ballotNote, rehearsalItems,
 } from '../logic.js';
 
 const config = JSON.parse(readFileSync(new URL('../config/templates/prmc-workshop.json', import.meta.url), 'utf8'));
@@ -31,11 +31,31 @@ test('G1：票數 10, 8, 8, 8, 5 → 名次 1, 2, 2, 2, 5；前 4 題優先聚�
   assert.deepEqual(rankCompetition([10, 8, 8, 8, 5]), [1, 2, 2, 2, 5]);
 });
 
-test('G2：票數 14, 20, 12, 10（總計 56）→ 占比 25%, 36%, 21%, 18%', () => {
+test('G2：票數 14, 20, 12, 10（總計 56）→ 占比 25.0%, 35.7%, 21.4%, 17.9%（T6）', () => {
   const { items, votes } = fixture([14, 20, 12, 10]);
   const r = tally(items, votes, 'impact', config.vote);
   const pctById = Object.fromEntries(r.map((x) => [x.id, x.pct]));
-  assert.deepEqual([pctById.i0, pctById.i1, pctById.i2, pctById.i3], [25, 36, 21, 18]);
+  assert.deepEqual([pctById.i0, pctById.i1, pctById.i2, pctById.i3], [25, 35.7, 21.4, 17.9]);
+});
+
+test('G18：占比一位小數、加總剛好 100.0%（T6）', () => {
+  const { items, votes } = fixture([10, 8, 8, 8, 5]);
+  assert.deepEqual(tally(items, votes, 'impact', config.vote).map((r) => r.pct), [25.7, 20.5, 20.5, 20.5, 12.8]);
+  assert.deepEqual(percentShares([1, 1, 1]), [33.4, 33.3, 33.3]);
+  assert.deepEqual(percentShares([0, 0]), [null, null]);
+  assert.deepEqual(percentShares([3, 0]), [100, 0]);
+  assert.equal(pctText(25), '25.0%');
+  assert.equal(pctText(null), '—');
+  // 隨機 500 組：加總都剛好 1000 個千分點，且每題和精確值差距小於 0.1%
+  let seed = 7; const rnd = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+  for (let k = 0; k < 500; k++) {
+    const counts = Array.from({ length: 1 + Math.floor(rnd() * 12) }, () => Math.floor(rnd() * 40));
+    const total = counts.reduce((a, b) => a + b, 0);
+    const p = percentShares(counts);
+    if (total === 0) continue;
+    assert.equal(p.reduce((a, b) => a + Math.round(b * 10), 0), 1000, JSON.stringify(counts));
+    p.forEach((x, i) => assert.ok(Math.abs(x - (counts[i] * 100) / total) < 0.1 + 1e-9, JSON.stringify(counts)));
+  }
 });
 
 test('G3：票數 3, 0, 0, 0 → 名次 1, 2, 2, 2；只有第 1 題優先聚焦（T5）', () => {
@@ -118,7 +138,7 @@ test('G9：JSON 匯出後再匯入 → 內容相同，visibility＝private', () 
   assert.equal(r.ok, true, r.errors.join('；'));
   assert.equal(r.session.meta.visibility, 'private');
   const { access, secrets, ...plain } = session;
-  assert.deepEqual(r.session, { ...plain, meta: { ...plain.meta, visibility: 'private' } });
+  assert.deepEqual(r.session, { ...plain, voteLog: {}, meta: { ...plain.meta, visibility: 'private' } });
 });
 
 test('G10：不同分類不能合併（T23）', () => {
@@ -239,20 +259,72 @@ test('G15：XLSX 四張工作表', () => {
   };
   const votes = { impact: { u1: { name: '小明', group: 2, v1: 'M', v2: 'C', ts: 1765436823000 }, u2: { name: '小華', group: 1, v1: 'M', ts: 1765436824000 } } };
   const sheets = buildXlsxSheets({ code: 'ABC234', meta: { title: '測試', templateId: 'prmc-workshop', config, phase: { index: 5, type: 'results' } }, items, votes, participants: {} }, 1765436900000);
-  assert.deepEqual(sheets.map((s) => s.name), ['建議關注點', '合併紀錄', '投票明細', '場次資訊']);
+  assert.deepEqual(sheets.map((s) => s.name), ['建議關注點', '合併紀錄', '投票明細', '場次資訊', '選票調整紀錄']);
   const [summary, merges, detail, info] = sheets.map((s) => s.rows);
   assert.deepEqual(summary[0], ['分類', '題目', '組別', '已改寫', '票數', '占比', '名次', '優先聚焦']);
-  assert.deepEqual(summary[1], ['實質影響', '甲乙', '第 1、3 組', '是', 2, '67%', 1, '是']);
-  assert.deepEqual(summary[2], ['實質影響', '丙', '第 2 組', '否', 1, '33%', 2, '是']);
+  assert.deepEqual(summary[1], ['實質影響', '甲乙', '第 1、3 組', '是', 2, '66.7%', 1, '是']);
+  assert.deepEqual(summary[2], ['實質影響', '丙', '第 2 組', '否', 1, '33.3%', 2, '是']);
   assert.deepEqual(summary[3], ['成本', '丁', '第 2 組', '否', 0, '—', 1, ''], '總票數 0：占比「—」、不是優先聚焦');
   assert.equal(merges.length, 3, '標題＋每個來源一列');
   assert.deepEqual(merges[1], ['甲乙', '甲', '第 1 組']);
-  assert.deepEqual(detail[0], ['分類', '姓名', '組別', '所投題目 1', '所投題目 2', '所投題目 3', '時間']);
+  assert.deepEqual(detail[0], ['分類', '姓名', '組別', '所投題目 1', '所投題目 2', '所投題目 3', '時間', '備註']);
   assert.deepEqual(detail[1].slice(0, 6), ['實質影響', '小華', 1, '甲乙', '', ''], '依組別排序');
   assert.match(detail[1][6], /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/);
   assert.deepEqual(info.find((r) => r[0] === '階段'), ['階段', '優先聚焦結果']);
   assert.deepEqual(info.find((r) => r[0] === '投票人數：實質影響'), ['投票人數：實質影響', 2]);
   assert.deepEqual(info.find((r) => r[0] === '投票人數（不重複）'), ['投票人數（不重複）', 2]);
+});
+
+test('G16：主持人調整選票（T30）', () => {
+  const items = {
+    A: { text: '甲', cat: 'impact', groups: { 1: true }, status: 'active' },
+    B: { text: '乙', cat: 'impact', groups: { 2: true }, status: 'active' },
+    M: { text: '舊', cat: 'impact', groups: { 1: true }, status: 'merged', mergedInto: 'A' },
+  };
+  const votes = { p1: { name: 'Mike', group: 2, v1: 'A', ts: 1 } };
+  // 只在結果階段
+  assert.equal(planBallotAdjust(config, items, votes, 'vote', 'impact', 'delete', { voterId: 'p1' }).ok, false);
+  // 修改：保留姓名組別、套用 R1
+  const e = planBallotAdjust(config, items, votes, 'results', 'impact', 'edit', { voterId: 'p1', ids: ['B'], by: 'h' });
+  assert.equal(e.ok, true);
+  assert.deepEqual(e.ballot, { name: 'Mike', group: 2, v1: 'B', hostEdited: true });
+  assert.deepEqual(e.log, { action: 'edit', cat: 'impact', voterId: 'p1', by: 'h', name: 'Mike', group: 2, before: { v1: 'A' }, after: { v1: 'B' } });
+  assert.equal(planBallotAdjust(config, items, votes, 'results', 'impact', 'edit', { voterId: 'p1', ids: ['M'] }).ok, false, '不能改成已合併的題目');
+  assert.equal(planBallotAdjust(config, items, votes, 'results', 'impact', 'edit', { voterId: 'p1', ids: [] }).ok, false, '至少 1 題');
+  assert.equal(planBallotAdjust(config, items, votes, 'results', 'impact', 'edit', { voterId: 'nobody', ids: ['A'] }).ok, false);
+  // 刪除
+  const d = planBallotAdjust(config, items, votes, 'results', 'impact', 'delete', { voterId: 'p1', by: 'h' });
+  assert.equal(d.ballot, null);
+  assert.deepEqual(d.log.before, { v1: 'A' });
+  // 代投
+  const a = planBallotAdjust(config, items, votes, 'results', 'impact', 'add', { voterId: 'host-1', ids: ['A', 'B'], name: ' 小華 ', group: '3', by: 'h' });
+  assert.deepEqual(a.ballot, { name: '小華', group: 3, v1: 'A', v2: 'B', hostEdited: true });
+  assert.equal(planBallotAdjust(config, items, votes, 'results', 'impact', 'add', { voterId: 'p9', ids: ['A'], name: 'x', group: 1 }).ok, false, '代投代號要 host- 開頭');
+  assert.equal(planBallotAdjust(config, items, votes, 'results', 'impact', 'add', { voterId: 'host-2', ids: ['A'], name: '', group: 1 }).ok, false, '姓名必填');
+  // 備註
+  assert.equal(ballotNote('p1', e.ballot), '主持人修改');
+  assert.equal(ballotNote('host-1', a.ballot), '主持人代投');
+  assert.equal(ballotNote('p1', votes.p1), '');
+});
+
+test('G16：XLSX 的備註欄與選票調整紀錄', () => {
+  const items = { A: { text: '甲', cat: 'impact', groups: { 1: true }, status: 'active' }, B: { text: '乙', cat: 'impact', groups: { 2: true }, status: 'active' } };
+  const votes = { impact: { p1: { name: 'Mike', group: 2, v1: 'B', ts: 1, hostEdited: true }, 'host-1': { name: '小華', group: 3, v1: 'A', ts: 2, hostEdited: true } } };
+  const voteLog = { l1: { action: 'edit', cat: 'impact', voterId: 'p1', name: 'Mike', group: 2, before: { v1: 'A' }, after: { v1: 'B' }, by: 'h', at: 1765436823000 } };
+  const sheets = buildXlsxSheets({ code: 'X', meta: { title: 't', config, phase: { index: 5, type: 'results' } }, items, votes, voteLog }, 1765436900000);
+  const detail = sheets.find((s) => s.name === '投票明細').rows;
+  assert.deepEqual(detail.slice(1).map((r) => [r[1], r[7]]), [['Mike', '主持人修改'], ['小華', '主持人代投']]);
+  const log = sheets.find((s) => s.name === '選票調整紀錄').rows;
+  assert.deepEqual(log[1].slice(1), ['修改', '實質影響', 'Mike', 2, '甲', '乙']);
+});
+
+test('G17：彩排示範題目', () => {
+  const list = JSON.parse(readFileSync(new URL('../config/templates/prmc-workshop.rehearsal.json', import.meta.url), 'utf8')).items;
+  const five = rehearsalItems(list, config, 5, 1000);
+  assert.equal(Object.keys(five).length, 10);
+  assert.ok(Object.values(five).every((it) => it.status === 'active' && normalizeItemText(it.text).ok));
+  assert.equal(Object.values(five).filter((it) => it.cat === 'impact').length, 5);
+  assert.equal(Object.keys(rehearsalItems(list, config, 3, 1000)).length, 6, '組數 3 時略過第 4、5 組');
 });
 
 test('匯入：版本比程式新、或不是本工具的檔案 → 拒絕', () => {

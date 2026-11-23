@@ -3,8 +3,10 @@
 > 專案代號：`concern-board`
 > 首次使用：3.成案期決策演練工作坊（12/11）14:25～15:17
 > 文件分兩部分：**Part A 使用說明**（主持人、小幫手、參與者、擁有者）／**Part B 開發交接**（Claude Code、未來的維護者）
-> 決策紀錄 T1～T29 不得自行重新詮釋；要修改時，先改決策紀錄，再改規格與程式。
+> 決策紀錄 T1～T30 不得自行重新詮釋；要修改時，先改決策紀錄，再改規格與程式。
 > 修訂：2026/11/20 B5 安全規則定稿（5 項差異見 B5，經 Mike 同意；決策紀錄未變更）
+> 修訂：2026/11/23 T6 改為「小數點後一位、最大餘數法、加總 100.0%」，經 Mike 同意；對應 A6、R2、G2、G18
+> 修訂：2026/11/23 新增決策 T30（主持人在結果階段調整選票，留紀錄），經 Mike 同意；v0.4 實作時同步更新 B3、B5、B6、B7、B8
 > 修訂：2026/11/23 新增決策 T26（QR 套件）、T27（QR 顯示時機）、T28（結果顯示占比和票數）、T29（開關投票＝切換階段），經 Mike 同意；對應 A5、A6、B2、B6、B8（G14、G15）、B9
 > 修訂：2026/11/23 T24 改名為「複製到另一類（並改寫描述）」，合併後的項目不提供，經 Mike 同意
 > 修訂：2026/11/20 新增決策 T23（不同分類不能合併）、T24（複製到另一類，原名「分拆」）、T25（合併後的已改寫），經 Mike 同意；對應 A6、B6、B8（G10～G13）、B9
@@ -87,6 +89,8 @@ flowchart LR
 | ⑤ 投票：成本 | 15:11 | 不能編輯 | 同上 | 同上 |
 | ⑥ 結果 | 15:15 | 不能編輯 | 「感謝參與」 | 兩類並排：名次、占比和票數（例如「36%（20 票）」，T28），優先聚焦項目加上標示 |
 
+> 結果階段若有人投錯、重複投票或沒投到，主持人可以在主持人畫面調整選票（T30），投影畫面即時更新。
+
 主持人可以退回上一個階段。某一類沒有題目時，自動跳過該類的投票階段。
 
 ## A6. 操作要點
@@ -108,10 +112,11 @@ flowchart LR
 - 每一段最多選 3 題（題數少於 3 時，最多等於題數），不必投滿。投票期間可以改票，以最後送出的為準。
 
 **主持人**
+- 結果階段可以「修改、刪除、代投」選票，每次調整都會留紀錄並在 XLSX 標示（T30）。
 - 切到投票階段就開始投票，切到下一個階段就結束；沒有另外的投票開關（T29）。主持人畫面可以匯出 JSON 和 XLSX（A3）。
 - 畫面上會顯示各類的投票人數和同名警示。
 - 結果畫面上，「優先聚焦」＝名次在前 3 名而且至少 1 票；同票的同名次（例如 1、2、2、2、5），所以優先聚焦可能超過 3 題。
-- 占比＝該題票數 ÷ 該類總票數，取整數 %。四捨五入後，加總可能是 99% 或 101%。
+- 占比＝該題票數 ÷ 該類總票數，取到小數點後一位，同一類加總剛好 100.0%（T6）。畫面上小數位用淡色顯示，閱讀時看整數即可。
 
 ## A7. 擁有者操作
 
@@ -150,7 +155,7 @@ flowchart LR
 | T3 | 投票者：姓名＋組別都必填；同組又同名時，後進入者被要求加註記；不收員工編號 |
 | T4 | 投票期間可以改票，後送出的覆蓋前一次 |
 | T5 | 0 票的項目不算優先聚焦 |
-| T6 | 占比取整數 %（四捨五入） |
+| T6 | 占比取到小數點後一位，用最大餘數法讓同一類的占比加總剛好 100.0%：先把每題的千分比全部捨去，差額每次 0.1% 依序補給捨去部分最大的題目（相同時補給排在前面的題目）；畫面上小數位用淡色顯示；XLSX 用同一組數字（2026/11/23 Mike 決定，取代原「取整數 %（四捨五入）」，原做法加總可能是 99%～102%） |
 | T7 | 結果只在投影畫面顯示，手機不顯示 |
 | T8 | 投票期間鎖住所有項目編輯 |
 | T9 | 項目有「已改寫」欄位（boolean） |
@@ -174,8 +179,9 @@ flowchart LR
 | T27 | QR code 只在投票階段的投影畫面顯示，旁邊寫場次代碼；內容是 `{網站網址}#/s/{代碼}`（2026/11/23 Mike 決定） |
 | T28 | 結果畫面同時顯示占比和票數，例如「36%（20 票）」；該類總票數 0 時占比顯示「—」（R2）（2026/11/23 Mike 決定） |
 | T29 | 「開關投票」就是切換階段：切到某類的投票階段＝開始投票，切到其他階段＝結束；不另設開關，安全規則不變（2026/11/23 Mike 決定） |
+| T30 | 主持人調整選票（2026/11/23 Mike 決定，v0.4 實作）：**只在結果階段**，主持人可以①修改某人的選票、②刪除一張選票（例如同一人投兩次）、③代為投票（輸入姓名、組別，代投的選票 uid 為 `host-` 開頭）。調整後的選票仍要符合 R1（至少 1 題、最多 min(3, 題數)、不重複、該類 active 題目）。**留紀錄並標示**：被調整的選票加上 `hostEdited: true`、`editedAt`；每次調整（含刪除）在 `voteLog` 留一筆不可修改的紀錄（動作、分類、調整前後、主持人 uid、時間）；主持人畫面和 XLSX 投票明細標示「主持人修改」或「主持人代投」。這是 T4（投票期間才能改票、只能改自己的）的例外；投錯題的人也可以由主持人退回投票階段後自行改票 |
 | R1 | 每段每人最多 `min(vote.maxPerVoter, 該類 active 題數)` 票；一題最多一票；可以不投滿 |
-| R2 | 占比＝該題票數 ÷ 該類總票數；總票數是 0 時顯示「—」 |
+| R2 | 占比＝該題票數 ÷ 該類總票數，取法見 T6；總票數是 0 時顯示「—」 |
 | R3 | 名次採 competition ranking：同票同名次，下一名跳號（1, 2, 2, 4） |
 | R4 | 優先聚焦＝名次 ≤ `priorityTopN`，而且票數 ≥ `priorityMinVotes` |
 | R5 | 兩類各自排名、並排顯示，不跨類合併排名 |
@@ -219,6 +225,10 @@ flowchart LR
     name: string, group: number
     v1?: itemId, v2?: itemId, v3?: itemId     # 最多 3 個，不能重複
     ts: serverTimestamp
+    hostEdited?: true, editedAt?: serverTimestamp   # T30：主持人調整過；代投的 uid 以 host- 開頭
+  voteLog/{logId}:                # T30：選票調整紀錄，只能新增、不能修改或刪除
+    action: "edit"|"delete"|"add", cat, voterId, name, group
+    before?: {v1,v2,v3}, after?: {v1,v2,v3}, by: uid, at: serverTimestamp
   participants/{uid}:
     name: string, group: number, joinedAt: serverTimestamp
 
@@ -256,7 +266,7 @@ flowchart LR
 ```
 驗證規則：分類的 key 不能重複；`phases` 裡的 category 必須存在；`groups.count` 介於 1～`max`，且 max ≤ 8；`maxPerVoter` 介於 1～10。驗證失敗時拒絕匯入，並列出所有錯誤。
 
-## B5. 安全規則（v0.1 定稿，2026/11/20 經 Mike 同意）
+## B5. 安全規則（v0.1 定稿 2026/11/20；v0.4 新增 T30 主持人調整選票）
 
 ```json
 {
@@ -268,8 +278,12 @@ flowchart LR
         ".write": "auth != null && auth.uid === 'OWNER_UID'",
         "meta": {
           ".write": "auth != null && auth.uid === 'OWNER_UID'",
-          "visibility": { ".validate": "newData.val() === 'private' || newData.val() === 'live' || newData.val() === 'demo'" },
-          "groupCount": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 8" },
+          "visibility": {
+            ".validate": "newData.val() === 'private' || newData.val() === 'live' || newData.val() === 'demo'"
+          },
+          "groupCount": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 8"
+          },
           "phase": {
             ".write": "auth != null && (auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
           }
@@ -277,21 +291,43 @@ flowchart LR
         "items": {
           "$id": {
             ".write": "auth != null && (auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('secrets/'+$code+'/helperPin').exists() && root.child('access/'+$code+'/helpers/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/helperPin').val() && (root.child('sessions/'+$code+'/meta/phase/type').val() === 'merge' || (root.child('sessions/'+$code+'/meta/phase/type').val() === 'collect' && (!data.exists() || data.child('groups/'+root.child('access/'+$code+'/helpers/'+auth.uid+'/group').val()).exists()) && (!newData.exists() || newData.child('groups/'+root.child('access/'+$code+'/helpers/'+auth.uid+'/group').val()).exists())))))",
-            "text": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 150" }
+            "text": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 150"
+            }
           }
         },
         "votes": {
           "$cat": {
             "$uid": {
-              ".write": "auth != null && auth.uid === $uid && root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'vote' && root.child('sessions/'+$code+'/meta/phase/category').val() === $cat",
+              ".write": "auth != null && ((auth.uid === $uid && root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'vote' && root.child('sessions/'+$code+'/meta/phase/category').val() === $cat) || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'results' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val()))",
               ".validate": "newData.hasChildren(['name','group','ts'])",
-              "v1": { ".validate": "auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
-              "v2": { ".validate": "auth.uid === 'OWNER_UID' || (newData.val() !== newData.parent().child('v1').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
-              "v3": { ".validate": "auth.uid === 'OWNER_UID' || (newData.val() !== newData.parent().child('v1').val() && newData.val() !== newData.parent().child('v2').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
-              "name":  { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30" },
-              "group": { ".validate": "newData.isNumber()" },
-              "ts":    { ".validate": "auth.uid === 'OWNER_UID' || newData.val() === now" },
-              "$other": { ".validate": false }
+              "v1": {
+                ".validate": "auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)"
+              },
+              "v2": {
+                ".validate": "auth.uid === 'OWNER_UID' || (newData.val() !== newData.parent().child('v1').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)"
+              },
+              "v3": {
+                ".validate": "auth.uid === 'OWNER_UID' || (newData.val() !== newData.parent().child('v1').val() && newData.val() !== newData.parent().child('v2').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)"
+              },
+              "name": {
+                ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30"
+              },
+              "group": {
+                ".validate": "newData.isNumber()"
+              },
+              "ts": {
+                ".validate": "auth.uid === 'OWNER_UID' || newData.val() === now || (data.exists() && newData.val() === data.val())"
+              },
+              "hostEdited": {
+                ".validate": "newData.val() === true && (auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'results' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
+              },
+              "editedAt": {
+                ".validate": "auth.uid === 'OWNER_UID' || (newData.val() === now && (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'results' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
+              },
+              "$other": {
+                ".validate": false
+              }
             }
           }
         },
@@ -299,29 +335,52 @@ flowchart LR
           "$uid": {
             ".write": "auth != null && auth.uid === $uid && root.child('sessions/'+$code+'/meta/visibility').val() === 'live'"
           }
+        },
+        "voteLog": {
+          "$id": {
+            ".write": "auth != null && !data.exists() && (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'results' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val())",
+            ".validate": "newData.hasChildren(['action','cat','voterId','by','at'])",
+            "action": {
+              ".validate": "newData.val() === 'edit' || newData.val() === 'delete' || newData.val() === 'add'"
+            },
+            "by": {
+              ".validate": "auth.uid === 'OWNER_UID' || newData.val() === auth.uid"
+            },
+            "at": {
+              ".validate": "auth.uid === 'OWNER_UID' || newData.val() === now"
+            }
+          }
         }
       }
     },
     "access": {
       "$code": {
         ".write": "auth != null && auth.uid === 'OWNER_UID'",
-        "helpers": { "$uid": {
-          ".read": "auth != null && (auth.uid === $uid || auth.uid === 'OWNER_UID')",
-          ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && root.child('secrets/'+$code+'/helperPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/helperPin').val()))"
-        }},
-        "hosts": { "$uid": {
-          ".read": "auth != null && (auth.uid === $uid || auth.uid === 'OWNER_UID')",
-          ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && root.child('secrets/'+$code+'/hostPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
-        }}
+        "helpers": {
+          "$uid": {
+            ".read": "auth != null && (auth.uid === $uid || auth.uid === 'OWNER_UID')",
+            ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && root.child('secrets/'+$code+'/helperPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/helperPin').val()))"
+          }
+        },
+        "hosts": {
+          "$uid": {
+            ".read": "auth != null && (auth.uid === $uid || auth.uid === 'OWNER_UID')",
+            ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && root.child('secrets/'+$code+'/hostPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
+          }
+        }
       }
     },
     "secrets": {
-      "$code": { ".read": false, ".write": "auth != null && auth.uid === 'OWNER_UID'" }
+      "$code": {
+        ".read": false,
+        ".write": "auth != null && auth.uid === 'OWNER_UID'"
+      }
     }
   }
 }
 ```
 - `OWNER_UID` 在設定步驟 4 換成擁有者的 UID（T22）。
+- **v0.4（T30）**：主持人（PIN 正確）在**結果階段**可以寫入、刪除任何一張選票；選票仍要通過 v1～v3 的檢查（active、同類、不重複）。主持人修改時 `ts` 可以沿用原值，`hostEdited`、`editedAt` 只有主持人在結果階段（或擁有者）能寫。`voteLog` 只能由主持人在結果階段新增、`by` 必須是自己、`at` 必須是伺服器時間，寫入後不能修改或刪除。
 - 已知的限制：「每段最多 min(3, n) 票」的 n 由前端檢查，規則只限制最多 3 票（v1～v3）。
 - 正確的 PIN 只會被寫在本人的 `access/{code}/...` 下，而這個路徑只有本人和擁有者能讀；`secrets` 一律不能讀取。
 - 正本是 `database.rules.json`；這裡的內容和它相同（只有 UID 換成 `OWNER_UID`）。已用 Firebase emulator 加上 `@firebase/rules-unit-testing` 驗證 B8 的全部權限案例（`tests/rules.test.js`）。
@@ -350,11 +409,14 @@ flowchart LR
 | `dupNameWarnings(participants)` | | 同組又同名的清單 | T3 |
 | `validateBallot(config, items, cat, ids)` | 勾選的題目 id | `{ok, error, ballot}`，ballot＝`{v1, v2, v3}` | R1；至少 1 題、不重複、都是該類 active 題目 |
 | `voterCount(votes)` | 該類的選票 | 投票人數 | A5 |
-| `buildXlsxSheets(session, exportedAt)` | | 四張工作表的列資料 | B7 |
+| `planBallotAdjust(config, items, votes, phaseType, cat, action, opts)` | action：edit／delete／add | `{ok, error, ballot, log}` | T30；只在結果階段；ballot 套用 R1 |
+| `ballotNote(voterId, ballot)` | | 「主持人修改」／「主持人代投」／空字串 | T30 |
+| `rehearsalItems(list, config, groupCount, now)` | 示範題目清單 | items | 彩排種子資料（v0.4） |
+| `buildXlsxSheets(session, exportedAt)` | | 五張工作表的列資料 | B7 |
 
 ## B7. 匯出與匯入格式
 
-- **JSON**：`{ tool: "concern-board", schemaVersion: 1, exportedAt, session: { code, meta, items, votes, participants } }`。**不包含** `access` 和 `secrets`。
+- **JSON**：`{ tool: "concern-board", schemaVersion: 1, exportedAt, session: { code, meta, items, votes, participants, voteLog } }`（`voteLog` 於 v0.4 加入，舊檔沒有時視為空）。**不包含** `access` 和 `secrets`。
   - 匯入時，`schemaVersion` 比程式新就拒絕；比程式舊就經過 migrate 函式轉換（v1 還不需要）。
   - 匯入後一律設成 `visibility: "private"`；要覆蓋已存在的場次代碼時，先自動匯出原場次。
 - **XLSX**（檔名 `{title}_{code}_{yyyymmdd}.xlsx`）：
@@ -363,8 +425,9 @@ flowchart LR
 |---|---|
 | 建議關注點 | 分類、題目、組別、已改寫、票數、占比、名次、優先聚焦 |
 | 合併紀錄 | 合併後題目、來源題目、來源組別 |
-| 投票明細 | 分類、姓名、組別、所投題目 1～3、時間 |
+| 投票明細 | 分類、姓名、組別、所投題目 1～3、時間、備註（T30：主持人修改／主持人代投） |
 | 場次資訊 | 標題、代碼、模板、階段、匯出時間、投票人數 |
+| 選票調整紀錄（v0.4，T30） | 時間、動作（修改／刪除／代為投票）、分類、姓名、組別、調整前、調整後 |
 
 ## B8. 驗證方式
 
@@ -373,9 +436,10 @@ flowchart LR
 | # | 輸入 | 期望 |
 |---|---|---|
 | G1 | 5 題的票數依序是 10, 8, 8, 8, 5 | 名次 1, 2, 2, 2, 5；優先聚焦的是前 4 題 |
-| G2 | 票數 14, 20, 12, 10，總計 56 | 占比 25%, 36%, 21%, 18% |
+| G2 | 票數 14, 20, 12, 10，總計 56 | 占比 25.0%, 35.7%, 21.4%, 17.9%（加總 100.0%；17.857 的餘數最大，補 0.1）（T6） |
 | G3 | 票數 3, 0, 0, 0 | 名次 1, 2, 2, 2；只有第 1 題是優先聚焦（T5） |
 | G4 | 該類只有 2 題，maxPerVoter=3 | maxVotes＝2 |
+| G18 | 票數 10, 8, 8, 8, 5（總計 39）；三題各 1 票 | 前者 25.7%, 20.5%, 20.5%, 20.5%, 12.8%；後者 33.4%, 33.3%, 33.3%；兩者加總都是 100.0%（T6） |
 | G5 | 某類總票數 0 | 占比全部是 null（顯示「—」），沒有優先聚焦 |
 | G6 | 合併 A（第 1 組）、B（第 3 組），再拆回 | 合併後的項目組別＝{1,3}；拆回後 A、B 都恢復 active、組別不變、沒有 mergedInto |
 | G7 | 選票指向一個已經 merged 的項目 | tally 忽略這一票 |
@@ -387,6 +451,8 @@ flowchart LR
 | G13 | 合併時選用 A 的原文字；另一次自己改寫 | 選用原文字：A、B 都沒改寫時 false，其中一題已改寫時 true；自己改寫：true（T25） |
 | G14 | 該類只有 2 題時選 3 題；選 0 題；選同一題兩次；選別類或已合併的題目 | validateBallot 全部拒絕；選 1～2 題通過（R1） |
 | G15 | 一個有合併、有投票的場次 | buildXlsxSheets 的四張表欄位與 B7 相同；合併紀錄每個來源一列；總票數 0 的類占比為「—」 |
+| G16 | 結果階段修改、刪除、代投；投票階段調整；改成已合併的題目；代投沒有姓名 | 結果階段的三種調整通過並產生紀錄；其他拒絕；XLSX 備註與調整紀錄正確（T30） |
+| G17 | 彩排示範題目，組數 5 與 3 | 5 組時 10 題、3 組時略過第 4、5 組 |
 
 **權限測試（`tests/rules.test.js`，用 emulator）**：
 - 私人場次：非擁有者讀取失敗
@@ -396,6 +462,7 @@ flowchart LR
 - PIN 錯誤時：寫入 `access` 失敗
 - 讀取 `secrets`：一律失敗
 - 投票：非投票階段寫入失敗；第 4 票（v4）失敗；同一題投兩次失敗；投給別的分類的題目失敗
+- 主持人調整選票（T30）：結果階段可以修改、刪除、代投並寫紀錄；投票階段不行；小幫手、參與者不行；不能改成已合併或別類的題目；紀錄不能修改、刪除、冒名；參與者不能自己標示「主持人修改」
 
 **實機測試**：
 - 用 5 個分頁同時輸入
@@ -411,7 +478,7 @@ flowchart LR
 | v0.1 | 專案骨架、`logic.js`、安全規則與測試、擁有者 `#/admin`（Google 登入、建立場次、可見性、PIN）、加入場次（PIN、組別、姓名）、收集階段、投影（依組別／依分類）、即時存檔、JSON 匯出入 | G6～G9 通過；權限測試全部通過；5 個分頁同時輸入正常 |
 | v0.2 | 階段控制、合併、拆回、刪除合併項目（T20）、複製到另一類（T24） | G6、G7、G10～G13 通過；收集與合併的權限差異正確 |
 | v0.3 | 分段投票、改票、隱藏票數、結果並排、XLSX、QR code | G1～G5、G14、G15 通過；模擬 30 人投票的結果正確 |
-| v0.4 | 同名警示、刪除前自動備份、彩排種子資料、列印題目清單、連線燈號 | 12/4～12/8 彩排一次通過 |
+| v0.4 | 主持人調整選票（T30；含安全規則、B3 `voteLog`、B7 投票明細「備註」欄，需重新部署規則）、同名警示、刪除前自動備份、彩排種子資料、列印題目清單、連線燈號 | G16、G17 通過；T30 權限測試通過；12/4～12/8 彩排一次通過（含 iPhone、Android 實機掃 QR code） |
 | v1.x | 設定檔編輯器、更多模板 | — |
 
 每個版本：開一個分支開發 → 自我驗證 → 提供 release note → Mike 確認後合併進 main 並部署。

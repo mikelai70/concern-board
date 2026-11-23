@@ -22,7 +22,7 @@ export const FIREBASE_CONFIG = {
 };
 // 擁有者 UID（T22：權限以 database.rules.json 為準，這裡只用來決定畫面）
 const OWNER_UID = 'BkEeFSDkL9YW98rv5qxFTgG06Lu1';
-const TEMPLATES = [{ id: 'prmc-workshop', file: 'config/templates/prmc-workshop.json' }];
+const TEMPLATES = [{ id: 'prmc-workshop', file: 'config/templates/prmc-workshop.json', rehearsal: 'config/templates/prmc-workshop.rehearsal.json' }];
 
 // 在本機（localhost）預覽時預設連到 emulator，不碰正式資料；網址加 ?prod 才連正式 Firebase。
 const params = new URLSearchParams(location.search);
@@ -141,6 +141,7 @@ function route() {
     if (view === 'screen') return viewScreen(code);
     if (view === 'helper') return viewHelper(code);
     if (view === 'host') return viewHost(code);
+    if (view === 'print') return viewPrint(code);
     if (view === 'vote') return viewParticipant(code);
     return viewJoin(code);
   }
@@ -597,8 +598,9 @@ async function viewHost(code) {
   let access = null;
   try { access = (await get(ref(db, `access/${code}/hosts/${uid}`))).val(); } catch { access = store.get(roleKey(code)); }
   if (!access) { location.hash = `#/s/${code}`; return; }
-  const body = h('div'); const note = h('div');
-  mount(h('div', { class: 'topbar' }, h('div', {}, h('h1', {}, '主持人'), h('p', { class: 'sub' }, `場次代碼 ${code}`)), connDot()), note, body);
+  const body = h('div'); const note = h('div'); const dialog = h('div');
+  mount(h('div', { class: 'topbar' }, h('div', {}, h('h1', {}, '主持人'), h('p', { class: 'sub' }, `場次代碼 ${code}`)), connDot()), note, dialog, body);
+  let last = null;
 
   async function go(phase, label) {
     if (!confirm(`切換到「${label}」？\n所有人的畫面會跟著改變。`)) return;
@@ -606,7 +608,98 @@ async function viewHost(code) {
     catch (e) { note.replaceChildren(msg('err', isPermissionDenied(e) ? '沒有權限切換階段：PIN 可能已更換，或場次不是「進行中」。請重新進入。' : `切換失敗：${e.message}`)); }
   }
 
+  // ---- T30：結果階段調整選票 ----
+  async function applyAdjust(cat, action, opts) {
+    const s = last;
+    const votes = (s.votes || {})[cat] || {};
+    const plan = L.planBallotAdjust(s.meta.config, s.items || {}, votes, s.meta.phase && s.meta.phase.type, cat, action, { ...opts, by: uid });
+    if (!plan.ok) return plan.error;
+    const before = votes[opts.voterId];
+    const logId = push(ref(db, `sessions/${code}/voteLog`)).key;
+    const u = {
+      [`votes/${cat}/${opts.voterId}`]: plan.ballot ? { ...plan.ballot, ts: before ? before.ts : serverTimestamp(), editedAt: serverTimestamp() } : null,
+      [`voteLog/${logId}`]: { ...plan.log, at: serverTimestamp() },
+    };
+    try { await update(ref(db, `sessions/${code}`), u); return null; }
+    catch (e) { return isPermissionDenied(e) ? '沒有權限：只有在結果階段、而且 PIN 沒有更換時才能調整。' : e.message; }
+  }
+  function openEditor(cat, voterId) {
+    const s = last;
+    const cfg = s.meta.config;
+    const c = catOf(cfg, cat);
+    const items = s.items || {};
+    const before = voterId ? ((s.votes || {})[cat] || {})[voterId] : null;
+    const list = L.itemsByCategory(items, cfg.categories).find((g) => g.cat === cat).items;
+    const max = L.maxVotes(cfg, items, cat);
+    const chosen = new Set(L.ballotIds(before));
+    const err = h('div');
+    const nameIn = h('input', { type: 'text', maxlength: 30, placeholder: '姓名' });
+    const groupIn = h('select', {}, h('option', { value: '' }, '請選擇'),
+      Array.from({ length: s.meta.groupCount }, (_, i) => h('option', { value: i + 1 }, `第 ${i + 1} 組`)));
+    const boxes = list.map((it) => {
+      const cb = h('input', { type: 'checkbox', checked: chosen.has(it.id) });
+      cb.addEventListener('change', () => {
+        if (cb.checked && chosen.size >= max) { cb.checked = false; err.replaceChildren(msg('warn', `最多選 ${max} 題`)); return; }
+        if (cb.checked) chosen.add(it.id); else chosen.delete(it.id);
+        err.replaceChildren();
+      });
+      return h('label', { class: 'field pickrow' }, cb, ' ', it.text);
+    });
+    const save = h('button', { class: 'primary' }, voterId ? '儲存修改' : '代為投票');
+    save.onclick = async () => {
+      save.disabled = true;
+      const ids = list.map((it) => it.id).filter((id) => chosen.has(id));
+      const e = voterId
+        ? await applyAdjust(cat, 'edit', { voterId, ids })
+        : await applyAdjust(cat, 'add', { voterId: `host-${push(ref(db, `sessions/${code}/votes`)).key}`, ids, name: nameIn.value, group: groupIn.value });
+      save.disabled = false;
+      if (e) { err.replaceChildren(msg('err', e)); return; }
+      dialog.replaceChildren();
+      note.replaceChildren(msg('ok', voterId ? `已修改「${before.name}」的選票，並留下紀錄。` : '已代為投票，並留下紀錄。'));
+    };
+    const box = h('div', { class: 'card dialog' },
+      h('div', { class: 'row' }, catChip(c), h('h2', { class: 'grow' }, voterId ? `修改「${before.name}（第 ${before.group} 組）」的選票` : '代為投票')),
+      voterId ? null : h('div', { class: 'row' }, h('label', { class: 'field grow' }, h('span', {}, '姓名'), nameIn), h('label', { class: 'field' }, h('span', {}, '組別'), groupIn)),
+      h('p', { class: 'sub' }, `勾選 1～${max} 題。這次調整會標示「${voterId ? '主持人修改' : '主持人代投'}」，並記錄在 XLSX 的「選票調整紀錄」。`),
+      boxes, err,
+      h('div', { class: 'row' }, save, h('button', { onclick: () => dialog.replaceChildren() }, '取消')));
+    dialog.replaceChildren(box);
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  async function removeBallot(cat, voterId) {
+    const b = ((last.votes || {})[cat] || {})[voterId];
+    if (!b || !confirm(`刪除「${b.name}（第 ${b.group} 組）」在這一類的選票？\n刪除會留下紀錄，投影畫面的結果會立即更新。`)) return;
+    const e = await applyAdjust(cat, 'delete', { voterId });
+    note.replaceChildren(e ? msg('err', e) : msg('ok', `已刪除「${b.name}」的選票，並留下紀錄。`));
+  }
+  function ballotPanel(s) {
+    const cfg = s.meta.config;
+    const items = s.items || {};
+    const textOf = (id) => (items[id] ? items[id].text : '（已刪除）');
+    return h('div', { class: 'card' }, h('h2', {}, '調整選票'),
+      h('p', { class: 'sub' }, '有人投錯、同一人投了兩次、或有人沒投到時使用（T30）。每次調整都會留紀錄。投錯的人也可以退回投票階段讓本人改票。'),
+      cfg.categories.map((c) => {
+        const ballots = Object.entries((s.votes || {})[c.key] || {})
+          .sort(([, a], [, b]) => (Number(a.group) - Number(b.group)) || String(a.name).localeCompare(String(b.name), 'zh-Hant'));
+        const dup = new Set(L.dupNameWarnings(Object.fromEntries(ballots)).flatMap((w) => w.uids));
+        return h('div', { class: 'section' },
+          h('div', { class: 'row' }, catChip(c), h('strong', { class: 'grow' }, `${ballots.length} 張選票`),
+            h('button', { onclick: () => openEditor(c.key, null) }, '＋ 代為投票')),
+          ballots.length ? h('table', {},
+            h('thead', {}, h('tr', {}, h('th', {}, '姓名'), h('th', { class: 'num' }, '組別'), h('th', {}, '所投題目'), h('th', {}, '備註'), h('th', {}, ''))),
+            h('tbody', {}, ballots.map(([vid, b]) => h('tr', { class: dup.has(vid) ? 'dup' : '' },
+              h('td', {}, b.name), h('td', { class: 'num' }, b.group),
+              h('td', {}, L.ballotIds(b).map(textOf).join('、')),
+              h('td', {}, [L.ballotNote(vid, b), dup.has(vid) ? '⚠ 同組同名' : ''].filter(Boolean).join('　')),
+              h('td', {}, h('div', { class: 'row' },
+                h('button', { onclick: () => openEditor(c.key, vid) }, '修改'),
+                h('button', { class: 'danger', onclick: () => removeBallot(c.key, vid) }, '刪除')))))))
+            : h('p', { class: 'sub' }, '（沒有選票）'));
+      }));
+  }
+
   watchSession(code, (s) => {
+    last = s;
     const { meta } = s;
     const items = s.items || {};
     const cfg = meta.config;
@@ -618,7 +711,9 @@ async function viewHost(code) {
     const byGroup = L.itemsByGroup(items, meta.groupCount);
     const warn = L.dupNameWarnings(s.participants);
     const hasActive = (cat) => Object.values(items).some((it) => it.status === 'active' && it.cat === cat);
-    body.replaceChildren(
+    const isResults = meta.phase.type === 'results';
+    if (!isResults) dialog.replaceChildren();
+    body.replaceChildren(...[
       h('div', { class: 'card' },
         h('h2', {}, meta.title),
         h('ol', { class: 'phases' }, cfg.phases.map((p, i) => h('li', { class: i === idx ? 'cur' : '' },
@@ -630,12 +725,15 @@ async function viewHost(code) {
           h('button', { class: 'primary', disabled: !next, onclick: () => go(next, labelOf(next)) }, next ? `前往「${labelOf(next)}」 ▶` : '已是最後一個階段')),
         h('p', { class: 'sub' }, '切到投票階段就開始投票，切到下一個階段就結束（T29）。'),
         h('div', { class: 'row' },
-          h('button', { onclick: () => window.open(`#/s/${code}/screen`, `screen-${code}`) }, '開啟投影畫面'))),
+          h('button', { onclick: () => window.open(`#/s/${code}/screen`, `screen-${code}`) }, '開啟投影畫面'),
+          h('button', { onclick: () => window.open(`#/s/${code}/print`, `print-${code}`) }, '列印題目清單'))),
+      warn.length ? msg('warn', `同組同名（可能是同一人重複加入）：${warn.map((w) => `第 ${w.group} 組「${w.name}」×${w.uids.length}`).join('、')}`) : null,
       h('div', { class: 'card' }, h('h2', {}, '投票人數'),
         h('table', {},
           h('thead', {}, h('tr', {}, cats.map((c) => h('th', { class: 'num' }, c.label)))),
           h('tbody', {}, h('tr', {}, cats.map((c) => h('td', { class: 'num' }, L.voterCount((s.votes || {})[c.key])))))),
-        h('p', { class: 'sub' }, '投票期間只顯示人數，票數到結果階段才在投影畫面公布。')),
+        h('p', { class: 'sub' }, isResults ? '結果已在投影畫面公布。' : '投票期間只顯示人數，票數到結果階段才在投影畫面公布。')),
+      isResults ? ballotPanel(s) : null,
       h('div', { class: 'card' }, h('h2', {}, '匯出'), exportButtons(code, () => s)),
       h('div', { class: 'card' }, h('h2', {}, '各組題數'),
         h('table', {},
@@ -645,8 +743,26 @@ async function viewHost(code) {
             h('td', { class: 'num' }, g.items.length))))),
         h('p', { class: 'sub' }, '合併後的題目會算在每一個來源組。')),
       h('div', { class: 'card' }, h('h2', {}, '參與者'),
-        h('p', {}, `已加入 ${Object.keys(s.participants || {}).length} 人`),
-        warn.length ? msg('warn', `同組同名：${warn.map((w) => `第 ${w.group} 組「${w.name}」×${w.uids.length}`).join('、')}`) : null));
+        h('p', {}, `已加入 ${Object.keys(s.participants || {}).length} 人`))].filter(Boolean));
+  }, (kind) => sessionError(code, kind));
+}
+
+// ---------- 列印題目清單（A9 紙本備案） ----------
+function viewPrint(code) {
+  const body = h('div', { class: 'print' });
+  mount(h('div', { class: 'noprint row' }, h('button', { class: 'primary', onclick: () => window.print() }, '列印'),
+    h('span', { class: 'sub' }, '建議用 A4 直式。網路或工具出問題時，各組改用便條紙、投票改用圓點貼。')), body);
+  watchSession(code, (s) => {
+    const cfg = s.meta.config;
+    body.replaceChildren(
+      h('h1', {}, s.meta.title), h('p', { class: 'sub' }, `場次代碼 ${code}｜列印時間 ${L.formatTime(Date.now())}`),
+      ...L.itemsByCategory(s.items || {}, cfg.categories).map((g) => {
+        const c = catOf(cfg, g.cat);
+        return h('div', { class: 'print-cat' }, h('h2', {}, `${c.label}（${g.items.length} 題）`),
+          h('table', {},
+            h('thead', {}, h('tr', {}, h('th', { class: 'num' }, '#'), h('th', {}, '題目'), h('th', {}, '組別'), h('th', {}, '圓點貼'))),
+            h('tbody', {}, g.items.map((it, i) => h('tr', {}, h('td', { class: 'num' }, i + 1), h('td', {}, it.text), h('td', {}, L.groupLabel(it.groups)), h('td', { class: 'dots' }, ''))))));
+      }));
   }, (kind) => sessionError(code, kind));
 }
 
@@ -729,6 +845,12 @@ function qrSvg(text) {
   qr.make();
   return qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
 }
+/** T6：占比的小數位用淡色（例如 25 .7 %），讓閱讀時著重整數 */
+function pctNode(pct) {
+  const t = L.pctText(pct);
+  const m = /^(\d+)(\.\d)%$/.exec(t);
+  return m ? h('span', { class: 'pct' }, m[1], h('span', { class: 'dec' }, m[2]), '%') : h('span', { class: 'pct' }, t);
+}
 function joinUrl(code) { return `${location.origin}${location.pathname}#/s/${code}`; }
 
 function viewScreen(code) {
@@ -740,7 +862,7 @@ function viewScreen(code) {
   const tools = h('div', { class: 'scr-tools' }, Object.entries(btns).map(([k, v]) =>
     h('button', { 'data-mode': k, onclick: () => { mode = k; paint(); } }, v)));
   const main = h('div'); const foot = h('div', { class: 'scr-foot' });
-  mount(h('div', { class: 'scr-head' }, h('div', {}, title, phase), tools), main, foot);
+  mount(h('div', { class: 'scr-head' }, h('div', {}, title, phase), h('div', { class: 'scr-right' }, tools, connDot())), main, foot);
   const qrBox = h('div', { class: 'scr-qr' });
   qrBox.innerHTML = qrSvg(joinUrl(code)); // 只含場次網址，由內嵌套件產生（T26、T27）
 
@@ -792,7 +914,7 @@ function viewScreen(code) {
           rows.length ? rows.map((r) => h('div', { class: `scr-res${r.priority ? ' pri' : ''}`, style: { borderLeftColor: c.color } },
             h('span', { class: 'rank' }, String(r.rank)),
             h('span', { class: 'txt' }, r.text, h('span', { class: 'g' }, L.groupLabel(r.groups))),
-            h('span', { class: 'num' }, L.pctText(r.pct), h('small', {}, `（${r.votes} 票）`)),
+            h('span', { class: 'num' }, pctNode(r.pct), h('small', {}, `（${r.votes} 票）`)),
             r.priority ? h('span', { class: 'pri-tag' }, `★ ${(cfg.labels && cfg.labels.priority) || '優先聚焦'}`) : null))
             : h('div', { class: 'scr-empty' }, '（沒有題目）'));
       })));
@@ -843,6 +965,7 @@ function viewAdmin() {
   const nSource = h('select', {});
   const nGroups = h('input', { type: 'number', min: 1, max: 8, value: 5 });
   const nBtn = h('button', { class: 'primary' }, '建立場次');
+  const nRehearsal = h('input', { type: 'checkbox' });
   function fillSources() {
     const cur = nSource.value;
     nSource.replaceChildren(...TEMPLATES.map((t) => h('option', { value: `tpl:${t.id}` }, `模板：${t.id}`)),
@@ -869,12 +992,20 @@ function viewAdmin() {
       let code;
       do { code = L.generateCode(); } while (sessions[code]);
       config.groups = { ...config.groups, count: Number(nGroups.value) };
+      // 彩排示範題目（假資料）
+      let items = null;
+      const tpl = TEMPLATES.find((t) => t.id === config.templateId);
+      if (nRehearsal.checked) {
+        if (!tpl || !tpl.rehearsal) throw new Error('這個模板沒有彩排示範題目');
+        const list = (await (await fetch(tpl.rehearsal, { cache: 'no-store' })).json()).items;
+        items = L.rehearsalItems(list, config, Number(nGroups.value), Date.now());
+      }
       await set(ref(db, `sessions/${code}`), { meta: {
-        title: nTitle.value.trim() || config.title, visibility: 'private', templateId: config.templateId || 'custom', schemaVersion: L.SCHEMA_VERSION,
+        title: nTitle.value.trim() || (nRehearsal.checked ? `彩排：${config.title}` : config.title), visibility: 'private', templateId: config.templateId || 'custom', schemaVersion: L.SCHEMA_VERSION,
         config, phase: L.phaseAt(config, 0), groupCount: Number(nGroups.value), createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
-      } });
-      nTitle.value = '';
-      out.replaceChildren(msg('ok', `已建立場次 ${code}。下一步：設定小幫手和主持人 PIN。`));
+      }, ...(items ? { items } : {}) });
+      nTitle.value = ''; nRehearsal.checked = false;
+      out.replaceChildren(msg('ok', `已建立場次 ${code}${items ? `（含 ${Object.keys(items).length} 題彩排示範題目）` : ''}。下一步：設定小幫手和主持人 PIN。`));
     } catch (e) { out.replaceChildren(msg('err', `建立失敗：${e.message}`)); } finally { nBtn.disabled = false; }
   };
 
@@ -941,6 +1072,21 @@ function viewAdmin() {
     a.focus();
   }
 
+  // A7：刪除前先自動匯出 JSON，再確認一次
+  async function deleteSession(code) {
+    const s = sessions[code];
+    if (!s) return;
+    exportSession(code, s);
+    if (!confirm(`已下載場次 ${code}「${s.meta && s.meta.title}」的 JSON 備份。\n\n確定要刪除這個場次嗎？刪除後無法復原，只能用備份檔「匯入 JSON」還原（PIN 要重新設定）。`)) {
+      out.replaceChildren(msg('info', `沒有刪除 ${code}（備份檔仍已下載）。`));
+      return;
+    }
+    try {
+      await update(ref(db), { [`sessions/${code}`]: null, [`access/${code}`]: null, [`secrets/${code}`]: null });
+      out.replaceChildren(msg('ok', `已刪除場次 ${code}。備份檔在你的「下載」資料夾。`));
+    } catch (e) { out.replaceChildren(msg('err', `刪除失敗：${e.message}`)); }
+  }
+
   function renderList() {
     const codes = Object.keys(sessions).sort((x, y) => ((sessions[y].meta || {}).createdAt || 0) - ((sessions[x].meta || {}).createdAt || 0));
     fillSources();
@@ -970,7 +1116,9 @@ function viewAdmin() {
             h('button', { onclick: () => pinDialog(code) }, '設定 PIN'),
             exportButtons(code, () => s),
             h('a', { href: `#/s/${code}`, target: '_blank' }, '開啟'),
-            h('a', { href: `#/s/${code}/screen`, target: '_blank' }, '投影'))));
+            h('a', { href: `#/s/${code}/screen`, target: '_blank' }, '投影'),
+            h('a', { href: `#/s/${code}/print`, target: '_blank' }, '列印'),
+            h('button', { class: 'danger', onclick: () => deleteSession(code) }, '刪除'))));
       }))));
   }
 
@@ -982,7 +1130,8 @@ function viewAdmin() {
     h('div', { class: 'card' }, h('h2', {}, '新場次'),
       h('label', { class: 'field' }, h('span', {}, '標題'), nTitle),
       h('label', { class: 'field' }, h('span', {}, '設定來源'), nSource),
-      h('label', { class: 'field' }, h('span', {}, '組數（1～8）'), nGroups), nBtn),
+      h('label', { class: 'field' }, h('span', {}, '組數（1～8）'), nGroups),
+      h('label', { class: 'field' }, nRehearsal, ' 加入彩排示範題目（每組 2 題，假資料，方便彩排）'), nBtn),
     h('div', { class: 'card' }, h('h2', {}, '匯入 JSON'), h('p', { class: 'sub' }, '匯入後可見性一律是「私人」；PIN 不會匯出，需要的話重新設定。'), iFile, iBox));
 
   const unsub = onValue(ref(db, 'sessions'), (s) => { sessions = s.val() || {}; renderList(); },

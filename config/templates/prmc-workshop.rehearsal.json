@@ -1,0 +1,16 @@
+{
+  "templateId": "prmc-workshop",
+  "note": "彩排用的示範題目（假資料）。建立場次時勾選「加入彩排示範題目」才會使用；組別超過場次組數的題目會略過。",
+  "items": [
+    {"group": 1, "cat": "impact", "rewritten": false, "text": "目標客群真的有這個痛點嗎？有沒有訪談證據？"},
+    {"group": 1, "cat": "cost",   "rewritten": false, "text": "需要額外的測試設備，預算從哪裡來？"},
+    {"group": 2, "cat": "impact", "rewritten": true,  "text": "競品已經有類似功能，我們的差異化是什麼？"},
+    {"group": 2, "cat": "cost",   "rewritten": false, "text": "關鍵人力目前都在其他專案，要怎麼調配？"},
+    {"group": 3, "cat": "impact", "rewritten": false, "text": "這個專案成功的衡量指標是什麼？"},
+    {"group": 3, "cat": "cost",   "rewritten": true,  "text": "外包開發後的維護成本有沒有算進去？"},
+    {"group": 4, "cat": "impact", "rewritten": false, "text": "如果延後半年推出，會失去哪些機會？"},
+    {"group": 4, "cat": "cost",   "rewritten": false, "text": "認證與法規的時程和費用估了嗎？"},
+    {"group": 5, "cat": "impact", "rewritten": false, "text": "會不會排擠現有產品線的營收？"},
+    {"group": 5, "cat": "cost",   "rewritten": false, "text": "量產前需要幾次試產？每次成本是多少？"}
+  ]
+}
