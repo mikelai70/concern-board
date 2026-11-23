@@ -188,6 +188,23 @@ export function voterCount(votes) {
   return Object.keys(votes || {}).length;
 }
 
+// ---------- T6：占比（小數點後一位、最大餘數法） ----------
+/**
+ * 回傳和輸入同順序的占比（例如 25.7），加總剛好 100.0；總數 0 時全部 null。
+ * 先把千分比全部捨去，差額每次 0.1 依序補給捨去部分最大的項目（相同時補給排在前面的）。
+ * 用整數運算，避免浮點誤差。
+ */
+export function percentShares(counts) {
+  const total = counts.reduce((a, b) => a + b, 0);
+  if (total === 0) return counts.map(() => null);
+  const base = counts.map((c) => Math.floor((c * 1000) / total));
+  const rem = counts.map((c, i) => c * 1000 - base[i] * total); // 餘數 × total
+  let left = 1000 - base.reduce((a, b) => a + b, 0);
+  const order = counts.map((_, i) => i).sort((a, b) => rem[b] - rem[a] || a - b);
+  for (const i of order) { if (left <= 0) break; if (rem[i] > 0) { base[i] += 1; left -= 1; } }
+  return base.map((t) => t / 10);
+}
+
 // ---------- R3 ----------
 /** competition ranking：同票同名次，下一名跳號。回傳和輸入同順序的名次。 */
 export function rankCompetition(counts) {
@@ -219,9 +236,10 @@ export function tally(items, votes, cat, voteCfg = {}) {
   list.sort((a, b) => b.votes - a.votes || String(a.text).localeCompare(String(b.text), 'zh-Hant'));
   const total = list.reduce((s, r) => s + r.votes, 0);
   const ranks = rankCompetition(list.map((r) => r.votes));
+  const shares = percentShares(list.map((r) => r.votes));
   return list.map((r, i) => ({
     ...r,
-    pct: total === 0 ? null : Math.round((r.votes / total) * 100),
+    pct: shares[i],
     rank: ranks[i],
     priority: ranks[i] <= topN && r.votes >= minVotes,
   }));
@@ -494,7 +512,7 @@ export function formatTime(ts) {
 }
 /** 結果的占比文字（T28、R2）：null → 「—」 */
 export function pctText(pct) {
-  return pct === null || pct === undefined ? '—' : `${pct}%`;
+  return pct === null || pct === undefined ? '—' : `${Number(pct).toFixed(1)}%`;
 }
 /**
  * session：{ code, meta, items, votes, participants }。

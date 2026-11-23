@@ -7,7 +7,7 @@ import {
   toExportJson, fromImportJson, nextPhase, dupNameWarnings, normalizeItemText,
   isValidPin, canHelperEdit, validateGroupCount, generateCode, isValidCode, isDuplicateName,
   canMerge, deleteItem, splitItem, helperActions, toPathUpdates, groupLabel,
-  validateBallot, ballotIds, voterCount, buildXlsxSheets, planBallotAdjust, ballotNote, rehearsalItems,
+  validateBallot, ballotIds, voterCount, buildXlsxSheets, percentShares, pctText, planBallotAdjust, ballotNote, rehearsalItems,
 } from '../logic.js';
 
 const config = JSON.parse(readFileSync(new URL('../config/templates/prmc-workshop.json', import.meta.url), 'utf8'));
@@ -31,11 +31,31 @@ test('G1：票數 10, 8, 8, 8, 5 → 名次 1, 2, 2, 2, 5；前 4 題優先聚�
   assert.deepEqual(rankCompetition([10, 8, 8, 8, 5]), [1, 2, 2, 2, 5]);
 });
 
-test('G2：票數 14, 20, 12, 10（總計 56）→ 占比 25%, 36%, 21%, 18%', () => {
+test('G2：票數 14, 20, 12, 10（總計 56）→ 占比 25.0%, 35.7%, 21.4%, 17.9%（T6）', () => {
   const { items, votes } = fixture([14, 20, 12, 10]);
   const r = tally(items, votes, 'impact', config.vote);
   const pctById = Object.fromEntries(r.map((x) => [x.id, x.pct]));
-  assert.deepEqual([pctById.i0, pctById.i1, pctById.i2, pctById.i3], [25, 36, 21, 18]);
+  assert.deepEqual([pctById.i0, pctById.i1, pctById.i2, pctById.i3], [25, 35.7, 21.4, 17.9]);
+});
+
+test('G18：占比一位小數、加總剛好 100.0%（T6）', () => {
+  const { items, votes } = fixture([10, 8, 8, 8, 5]);
+  assert.deepEqual(tally(items, votes, 'impact', config.vote).map((r) => r.pct), [25.7, 20.5, 20.5, 20.5, 12.8]);
+  assert.deepEqual(percentShares([1, 1, 1]), [33.4, 33.3, 33.3]);
+  assert.deepEqual(percentShares([0, 0]), [null, null]);
+  assert.deepEqual(percentShares([3, 0]), [100, 0]);
+  assert.equal(pctText(25), '25.0%');
+  assert.equal(pctText(null), '—');
+  // 隨機 500 組：加總都剛好 1000 個千分點，且每題和精確值差距小於 0.1%
+  let seed = 7; const rnd = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+  for (let k = 0; k < 500; k++) {
+    const counts = Array.from({ length: 1 + Math.floor(rnd() * 12) }, () => Math.floor(rnd() * 40));
+    const total = counts.reduce((a, b) => a + b, 0);
+    const p = percentShares(counts);
+    if (total === 0) continue;
+    assert.equal(p.reduce((a, b) => a + Math.round(b * 10), 0), 1000, JSON.stringify(counts));
+    p.forEach((x, i) => assert.ok(Math.abs(x - (counts[i] * 100) / total) < 0.1 + 1e-9, JSON.stringify(counts)));
+  }
 });
 
 test('G3：票數 3, 0, 0, 0 → 名次 1, 2, 2, 2；只有第 1 題優先聚焦（T5）', () => {
@@ -242,8 +262,8 @@ test('G15：XLSX 四張工作表', () => {
   assert.deepEqual(sheets.map((s) => s.name), ['建議關注點', '合併紀錄', '投票明細', '場次資訊', '選票調整紀錄']);
   const [summary, merges, detail, info] = sheets.map((s) => s.rows);
   assert.deepEqual(summary[0], ['分類', '題目', '組別', '已改寫', '票數', '占比', '名次', '優先聚焦']);
-  assert.deepEqual(summary[1], ['實質影響', '甲乙', '第 1、3 組', '是', 2, '67%', 1, '是']);
-  assert.deepEqual(summary[2], ['實質影響', '丙', '第 2 組', '否', 1, '33%', 2, '是']);
+  assert.deepEqual(summary[1], ['實質影響', '甲乙', '第 1、3 組', '是', 2, '66.7%', 1, '是']);
+  assert.deepEqual(summary[2], ['實質影響', '丙', '第 2 組', '否', 1, '33.3%', 2, '是']);
   assert.deepEqual(summary[3], ['成本', '丁', '第 2 組', '否', 0, '—', 1, ''], '總票數 0：占比「—」、不是優先聚焦');
   assert.equal(merges.length, 3, '標題＋每個來源一列');
   assert.deepEqual(merges[1], ['甲乙', '甲', '第 1 組']);

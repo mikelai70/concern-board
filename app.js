@@ -845,6 +845,12 @@ function qrSvg(text) {
   qr.make();
   return qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
 }
+/** T6：占比的小數位用淡色（例如 25 .7 %），讓閱讀時著重整數 */
+function pctNode(pct) {
+  const t = L.pctText(pct);
+  const m = /^(\d+)(\.\d)%$/.exec(t);
+  return m ? h('span', { class: 'pct' }, m[1], h('span', { class: 'dec' }, m[2]), '%') : h('span', { class: 'pct' }, t);
+}
 function joinUrl(code) { return `${location.origin}${location.pathname}#/s/${code}`; }
 
 function viewScreen(code) {
@@ -908,7 +914,7 @@ function viewScreen(code) {
           rows.length ? rows.map((r) => h('div', { class: `scr-res${r.priority ? ' pri' : ''}`, style: { borderLeftColor: c.color } },
             h('span', { class: 'rank' }, String(r.rank)),
             h('span', { class: 'txt' }, r.text, h('span', { class: 'g' }, L.groupLabel(r.groups))),
-            h('span', { class: 'num' }, L.pctText(r.pct), h('small', {}, `（${r.votes} 票）`)),
+            h('span', { class: 'num' }, pctNode(r.pct), h('small', {}, `（${r.votes} 票）`)),
             r.priority ? h('span', { class: 'pri-tag' }, `★ ${(cfg.labels && cfg.labels.priority) || '優先聚焦'}`) : null))
             : h('div', { class: 'scr-empty' }, '（沒有題目）'));
       })));

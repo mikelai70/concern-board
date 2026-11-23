@@ -1,6 +1,7 @@
 // 模擬 30 位參與者在兩段投票中投票（含改票），檢查結果是否和 golden test G1、G2 一致（B8、B9 v0.3 驗收）。
 // 需要先執行 npm run dev。用法：node tools/sim-voters.js
-// 會建立場次 SIM030（進行中），跑完停在「結果」階段，可以打開 http://localhost:8000/#/s/SIM030/screen 看結果畫面。
+// 會建立場次 SIM030（進行中，小幫手 PIN 111111、主持人 PIN 222222），跑完停在「結果」階段，
+// 可以打開 http://localhost:8000/#/s/SIM030/screen 看結果畫面，或用主持人 PIN 進入練習「調整選票」（T30）。
 import { readFileSync } from 'node:fs';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, signInAnonymously, connectAuthEmulator } from 'firebase/auth';
@@ -34,6 +35,7 @@ function ballots(cat) {
 
 await put(`sessions/${CODE}`, { meta: { title: '模擬 30 人投票', visibility: 'live', templateId: 'prmc-workshop', schemaVersion: 1, config,
   phase: { index: 3, type: 'vote', category: 'impact' }, groupCount: 5, createdAt: now, updatedAt: now }, items });
+await put(`secrets/${CODE}`, { helperPin: '111111', hostPin: '222222' });
 
 const voters = [];
 for (let i = 0; i < N; i++) {
@@ -78,7 +80,10 @@ const results = [
   expect('G1 票數', g1.map((r) => r.votes), [10, 8, 8, 8, 5]),
   expect('G1 名次', g1.map((r) => r.rank), [1, 2, 2, 2, 5]),
   expect('G1 優先聚焦', g1.map((r) => r.priority), [true, true, true, true, false]),
-  expect('G2 占比（題 1～4）', ['cost0', 'cost1', 'cost2', 'cost3'].map((id) => byId(g2, 'pct')[id]), [25, 36, 21, 18]),
+  expect('G1 占比（加總 100.0%）', g1.map((r) => r.pct), [25.7, 20.5, 20.5, 20.5, 12.8]),
+  expect('G2 占比（題 1～4）', ['cost0', 'cost1', 'cost2', 'cost3'].map((id) => byId(g2, 'pct')[id]), [25, 35.7, 21.4, 17.9]),
 ];
-console.log(results.every(Boolean) ? '\n模擬 30 人投票：結果全部正確。投影畫面：http://localhost:8000/#/s/SIM030/screen' : '\n有結果不正確');
+console.log(results.every(Boolean)
+  ? '\n模擬 30 人投票：結果全部正確。\n投影畫面：http://localhost:8000/#/s/SIM030/screen\n主持人：http://localhost:8000/#/s/SIM030（主持人 PIN 222222）'
+  : '\n有結果不正確');
 process.exit(results.every(Boolean) ? 0 : 1);
