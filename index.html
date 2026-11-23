@@ -11,6 +11,7 @@
     --radius: 10px;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font-family: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; font-size: 16px; line-height: 1.5; }
   #app { max-width: 960px; margin: 0 auto; padding: 16px; }
@@ -53,6 +54,20 @@
   .readonly .item { opacity: .9; }
   details summary { cursor: pointer; color: var(--muted); }
   code.code { font-size: 18px; letter-spacing: 2px; font-weight: 700; }
+  .item .actions { justify-content: flex-end; margin-top: 8px; }
+  .item .actions button { padding: 4px 12px; font-size: 14px; }
+  .item .pick { font-size: 14px; color: var(--muted); }
+  .item .sources { margin-top: 6px; }
+  .section { margin: 8px 0 16px; }
+  .section-h { display: inline-block; font-size: 16px; padding: 3px 12px; border-radius: 8px; margin: 8px 0 0; }
+  .mergebar { position: sticky; bottom: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 10px 12px; margin-top: 12px; box-shadow: 0 -2px 10px rgba(0,0,0,.08); }
+  .warntext { color: var(--warn); }
+  .dialog { border: 2px solid var(--accent); }
+  .dialog .item .state { margin-left: auto; color: var(--accent); }
+  ol.phases { padding-left: 22px; margin: 8px 0 14px; }
+  ol.phases li { padding: 3px 0; color: var(--muted); }
+  ol.phases li.cur { color: var(--text); font-weight: 600; }
 
   /* 投影畫面：以 1920×1080 為準 */
   body.screen { background: #10161f; color: #f2f4f7; min-height: 100vh; }

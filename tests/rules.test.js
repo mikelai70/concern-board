@@ -121,6 +121,38 @@ test('小幫手在合併階段：可以編輯所有組', async () => {
   await seed({ phase: { index: 1, type: 'merge' } });
   await assertSucceeds(as('helper1').ref('sessions/LIVE01/items/b2/text').set('合併階段改別組'));
 });
+// 合併：一次寫入新項目＋來源改為 merged（和 app.js 相同的多路徑寫入）
+const mergeWrite = (db, code, ids, newId, groups) => db.ref(`sessions/${code}/items`).update({
+  [newId]: { text: '合併後', cat: 'impact', groups, rewritten: true, status: 'active', sources: Object.fromEntries(ids.map((i) => [i, true])) },
+  ...Object.fromEntries(ids.map((i) => [`${i}/status`, 'merged'])),
+  ...Object.fromEntries(ids.map((i) => [`${i}/mergedInto`, newId])),
+});
+
+test('小幫手在收集階段：合併含別組的題目失敗（整筆被拒，原題不變）', async () => {
+  await assertFails(mergeWrite(as('helper1'), 'LIVE01', ['a1', 'b2'], 'mx', { 1: true, 2: true }));
+  let status;
+  await env.withSecurityRulesDisabled(async (ctx) => { status = (await ctx.database().ref('sessions/LIVE01/items/a1/status').get()).val(); });
+  if (status !== 'active') throw new Error(`原題被改動了：${status}`);
+});
+test('小幫手在合併階段：跨組合併、拆回、複製到另一類都成功', async () => {
+  await seed({ phase: { index: 1, type: 'merge' } });
+  const h = as('helper1');
+  await assertSucceeds(mergeWrite(h, 'LIVE01', ['a1', 'b2'], 'mx', { 1: true, 2: true }));
+  await assertSucceeds(h.ref('sessions/LIVE01/items').update({
+    mx: null, 'a1/status': 'active', 'a1/mergedInto': null, 'b2/status': 'active', 'b2/mergedInto': null,
+  }));
+  await assertSucceeds(h.ref('sessions/LIVE01/items/sp1').set({ text: '第二組的題目', cat: 'cost', groups: { 2: true }, rewritten: true, status: 'active' }));
+});
+test('小幫手在收集階段：複製本組題目到另一類成功，別組題目失敗（T24）', async () => {
+  const h = as('helper1');
+  await assertSucceeds(h.ref('sessions/LIVE01/items/sp1').set({ text: '第一組的題目', cat: 'cost', groups: { 1: true }, rewritten: true, status: 'active' }));
+  await assertFails(h.ref('sessions/LIVE01/items/sp2').set({ text: '第二組的題目', cat: 'cost', groups: { 2: true }, rewritten: true, status: 'active' }));
+});
+test('分享階段：小幫手不能合併', async () => {
+  await seed({ phase: { index: 2, type: 'share' } });
+  await assertFails(mergeWrite(as('helper1'), 'LIVE01', ['a1', 'b2'], 'mx', { 1: true, 2: true }));
+});
+
 test('投票、分享、結果階段：小幫手不能編輯（T8）', async () => {
   for (const phase of [{ index: 2, type: 'share' }, { index: 3, type: 'vote', category: 'impact' }, { index: 5, type: 'results' }]) {
     await seed({ phase });

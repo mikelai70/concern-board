@@ -262,6 +262,12 @@ async function viewJoin(code) {
 }
 
 // ---------- 小幫手 ----------
+/** 只在順序不同時才移動元素（移動正在輸入的元素會讓它失去焦點） */
+function placeInOrder(container, els) {
+  els.forEach((el, i) => { if (container.children[i] !== el) container.insertBefore(el, container.children[i] || null); });
+  while (container.children.length > els.length) container.lastChild.remove();
+}
+
 async function viewHelper(code) {
   const uid = auth.currentUser.uid;
   const role = store.get(roleKey(code));
@@ -271,26 +277,40 @@ async function viewHelper(code) {
   try { access = (await get(ref(db, `access/${code}/helpers/${uid}`))).val(); } catch { /* 離線時沿用本機紀錄 */ access = role && role.role === 'helper' ? { group: role.group } : null; }
   if (!access) { location.hash = `#/s/${code}`; return; }
   const group = Number(access.group);
+  const itemsRef = () => ref(db, `sessions/${code}/items`);
 
   const pending = store.get(pendingKey(code)) || {}; // { id: { text, cat, rewritten, isNew } }
   const savePending = () => store.set(pendingKey(code), pending);
-  const rows = new Map(); // id → { el, update(item, meta) }
+  const rows = new Map(); // id → row
   const timers = new Map();
+  const selected = new Set(); // 合併階段勾選的題目
+  const sections = new Map(); // key → { wrap, list, head }
   let session = null;
 
-  const title = h('h1'); const sub = h('p', { class: 'sub' }); const banner = h('div');
-  const mineBox = h('div'); const othersBox = h('div', { class: 'readonly' });
+  const title = h('h1'); const sub = h('p', { class: 'sub' }); const banner = h('div'); const dialog = h('div');
+  const listHead = h('h2', { class: 'grow' });
+  const mineBox = h('div');
+  const emptyEl = h('p', { class: 'sub' }, '還沒有題目，按「新增一題」開始。');
+  const othersBox = h('div', { class: 'readonly' });
+  const othersWrap = h('details', { class: 'card' }, h('summary', {}, '其他組的題目（唯讀）'), othersBox);
   const addBtn = h('button', { class: 'primary' }, '＋ 新增一題');
-  mount(h('div', { class: 'topbar' }, h('div', {}, title, sub), connDot()), banner,
-    h('div', { class: 'row' }, h('h2', { class: 'grow' }, `第 ${group} 組的題目`), addBtn), mineBox,
-    h('details', { class: 'card' }, h('summary', {}, '其他組的題目（唯讀）'), othersBox));
+  const mergeInfo = h('span', { class: 'grow' });
+  const clearBtn = h('button', { onclick: () => { selected.clear(); render(); } }, '取消勾選');
+  const mergeBtn = h('button', { class: 'primary', onclick: () => openMergeDialog() }, '合併');
+  const mergeBar = h('div', { class: 'mergebar row' }, mergeInfo, clearBtn, mergeBtn);
+  mount(h('div', { class: 'topbar' }, h('div', {}, title, sub), connDot()), banner, dialog,
+    h('div', { class: 'row' }, listHead, addBtn), mineBox, othersWrap, mergeBar);
 
+  const cfg = () => session.meta.config;
+  const maxLen = () => (cfg().itemFields && cfg().itemFields.maxLength) || 150;
+  const denied = (e) => (isPermissionDenied(e) ? '沒有權限：可能階段已切換或 PIN 已更換' : e.message);
+
+  // ---- 即時存檔（T15） ----
   function writeItem(id) {
     const d = pending[id];
     if (!d || !session) return;
     const row = rows.get(id);
-    const cfg = session.meta.config;
-    const t = L.normalizeItemText(d.text, cfg.itemFields && cfg.itemFields.maxLength);
+    const t = L.normalizeItemText(d.text, maxLen());
     if (!t.ok) { row && row.state('err', d.isNew ? `尚未儲存：${t.error}` : `${t.error}（未儲存）`); return; }
     if (!d.cat) { row && row.state('err', '尚未儲存：請選分類'); return; }
     const exists = session.items && session.items[id];
@@ -307,7 +327,7 @@ async function viewHelper(code) {
       if (JSON.stringify(pending[id]) === snapshot) { delete pending[id]; savePending(); }
       rows.get(id) && rows.get(id).state('ok', '已儲存');
     }).catch((e) => {
-      rows.get(id) && rows.get(id).state('err', isPermissionDenied(e) ? '沒有權限：可能階段已切換或 PIN 已更換' : `儲存失敗：${e.message}`);
+      rows.get(id) && rows.get(id).state('err', `儲存失敗：${denied(e)}`);
       if (isPermissionDenied(e)) { delete pending[id]; savePending(); }
     });
   }
@@ -317,109 +337,228 @@ async function viewHelper(code) {
   }
   addCleanup(() => timers.forEach((t) => clearTimeout(t)));
 
-  function makeRow(id, editable) {
-    const cfg = session.meta.config;
-    const maxLen = (cfg.itemFields && cfg.itemFields.maxLength) || 150;
-    const ta = h('textarea', { maxlength: maxLen, placeholder: `輸入${(cfg.labels && cfg.labels.item) || '題目'}（必填，上限 ${maxLen} 字）` });
+  // ---- 合併、拆回、複製到另一類、刪除：讀最新資料 → logic.js 算變更 → 一次寫入 ----
+  async function apply(compute) {
+    let fresh;
+    try { fresh = (await get(itemsRef())).val() || {}; } catch { fresh = (session && session.items) || {}; }
+    let updates;
+    try { updates = compute(fresh); } catch (e) { alert(`無法完成：${e.message}（可能有人剛改動了這些題目）`); return false; }
+    const u = L.toPathUpdates(fresh, updates);
+    for (const [id, v] of Object.entries(updates)) {
+      if (v === null) { delete pending[id]; continue; }
+      if (fresh[id]) { u[`${id}/updatedAt`] = serverTimestamp(); u[`${id}/updatedBy`] = uid; }
+      else u[id] = { ...u[id], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), updatedBy: uid };
+    }
+    savePending();
+    try { await update(itemsRef(), u); return true; } catch (e) { alert(`寫入失敗：${denied(e)}`); return false; }
+  }
+  async function doSplit(id) {
+    const newId = push(itemsRef()).key;
+    const ok = await apply((fresh) => {
+      const r = L.splitItem(fresh, id, cfg().categories, { newId, uid, group });
+      return { [r.id]: r.item };
+    });
+    if (ok) setTimeout(() => { const r = rows.get(newId); if (r) { r.focus(); r.state('', '已複製到另一類：請把兩題各自改寫成只講一個面向'); } }, 300);
+  }
+  async function doUnmerge(id) {
+    const n = Object.keys(session.items[id].sources || {}).length;
+    if (!confirm(`拆回成原本的 ${n} 題？`)) return;
+    await apply((fresh) => L.unmerge(fresh, id));
+  }
+  function doDelete(id) {
+    const item = session.items && session.items[id];
+    if (!item) { delete pending[id]; savePending(); render(); return; }
+    if (!item.sources) {
+      if (confirm(`確定刪除這一題？\n\n${item.text}`)) apply((fresh) => L.deleteItem(fresh, id));
+      return;
+    }
+    // T20：合併後的題目，預設拆回
+    const rUn = h('input', { type: 'radio', name: 'delmode', value: 'unmerge', checked: true });
+    const rAll = h('input', { type: 'radio', name: 'delmode', value: 'cascade' });
+    const box = h('div', { class: 'card dialog' }, h('h2', {}, '刪除合併後的題目'),
+      h('p', {}, item.text),
+      h('label', { class: 'field' }, rUn, ' 拆回：刪除這一題，原本的幾題恢復顯示（建議）'),
+      h('label', { class: 'field' }, rAll, ' 連同原題一起刪除：這一題和合併前的所有題目都刪除'),
+      h('div', { class: 'row' },
+        h('button', { class: 'danger', onclick: async () => { const mode = rAll.checked ? 'cascade' : 'unmerge'; if (await apply((fresh) => L.deleteItem(fresh, id, mode))) dialog.replaceChildren(); } }, '確定'),
+        h('button', { onclick: () => dialog.replaceChildren() }, '取消')));
+    dialog.replaceChildren(box); box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function openMergeDialog() {
+    const ids = [...selected];
+    const check = L.canMerge(session.items, ids);
+    if (!check.ok) { alert(check.error); return; }
+    const items = session.items;
+    const ta = h('textarea', { maxlength: maxLen() });
+    ta.value = items[ids[0]].text;
+    const counter = h('span', { class: 'sub' });
+    const paint = () => { counter.textContent = `${[...ta.value].length}/${maxLen()}`; };
+    ta.addEventListener('input', paint); paint();
+    const err = h('div');
+    const newId = push(itemsRef()).key;
+    const box = h('div', { class: 'card dialog' }, h('h2', {}, `合併 ${ids.length} 題`),
+      h('p', { class: 'sub' }, '選用其中一題的文字，或在下面直接改寫。組別會自動合併。'),
+      ids.map((id) => h('div', { class: 'item', style: { borderLeftColor: (catOf(cfg(), items[id].cat) || {}).color } },
+        items[id].text,
+        h('div', { class: 'meta' }, h('span', { class: 'sub' }, L.groupLabel(items[id].groups)),
+          h('button', { class: 'state', onclick: () => { ta.value = items[id].text; paint(); } }, '用這題的文字')))),
+      h('label', { class: 'field' }, h('span', {}, '合併後的題目'), ta), counter, err,
+      h('div', { class: 'row' },
+        h('button', { class: 'primary', onclick: async () => {
+          const t = L.normalizeItemText(ta.value, maxLen());
+          if (!t.ok) { err.replaceChildren(msg('err', t.error)); return; }
+          if (await apply((fresh) => L.mergeItems(fresh, ids, t.value, { newId, uid, group, maxLength: maxLen() }).updates)) {
+            selected.clear(); dialog.replaceChildren(); render();
+          }
+        } }, '確定合併'),
+        h('button', { onclick: () => dialog.replaceChildren() }, '取消')));
+    dialog.replaceChildren(box); box.scrollIntoView({ behavior: 'smooth', block: 'center' }); ta.focus();
+  }
+
+  // ---- 一題的編輯列 ----
+  const pick = (it) => (it ? { text: it.text, cat: it.cat, rewritten: Boolean(it.rewritten) } : { text: '', cat: '', rewritten: false });
+  function makeRow(id) {
+    const ta = h('textarea', { maxlength: maxLen(), placeholder: `輸入${(cfg().labels && cfg().labels.item) || '題目'}（必填，上限 ${maxLen()} 字）` });
     const counter = h('span', { class: 'sub' });
     const stateEl = h('span', { class: 'state' });
-    const name = `cat-${id}`;
-    const radios = cfg.categories.map((c) => {
-      const r = h('input', { type: 'radio', name, value: c.key });
+    const sel = h('input', { type: 'checkbox', title: '勾選後可以合併' });
+    const selLabel = h('label', { class: 'pick' }, sel, ' 選取');
+    const radios = cfg().categories.map((c) => {
+      const r = h('input', { type: 'radio', name: `cat-${id}`, value: c.key });
       return { c, r, label: h('label', { style: { borderColor: c.color } }, r, c.label) };
     });
     const rw = h('input', { type: 'checkbox' });
-    const delBtn = h('button', { class: 'danger' }, '刪除');
     const groupsEl = h('span', { class: 'sub' });
-    const el = h('div', { class: 'item' }, ta,
+    const sourcesEl = h('div', { class: 'sub sources' });
+    const splitBtn = h('button', { title: '內容同時談到兩類時：複製一份到另一類，再把兩題各自改寫成只講一個面向（T24）', onclick: () => doSplit(id) }, '複製到另一類（並改寫描述）');
+    const unmergeBtn = h('button', { onclick: () => doUnmerge(id) }, '拆回');
+    const delBtn = h('button', { class: 'danger', onclick: () => doDelete(id) }, '刪除');
+    const el = h('div', { class: 'item' }, h('div', { class: 'row' }, selLabel, h('span', { class: 'grow' })), ta,
       h('div', { class: 'meta' },
         h('span', { class: 'catpick row' }, radios.map((x) => x.label)),
-        cfg.itemFields && cfg.itemFields.rewritten ? h('label', {}, rw, ' 已改寫') : null,
-        groupsEl, counter, stateEl, delBtn));
+        cfg().itemFields && cfg().itemFields.rewritten ? h('label', {}, rw, ' 已改寫') : null,
+        groupsEl, counter, stateEl),
+      sourcesEl,
+      h('div', { class: 'row actions' }, splitBtn, unmergeBtn, delBtn));
     const local = () => pending[id] || (pending[id] = { ...pick(session.items && session.items[id]) });
-    const changed = () => { savePending(); counter.textContent = `${[...ta.value].length}/${maxLen}`; schedule(id); paintCat(); };
+    const changed = () => { savePending(); counter.textContent = `${[...ta.value].length}/${maxLen()}`; schedule(id); paintCat(); };
     ta.addEventListener('input', () => { local().text = ta.value; changed(); });
     radios.forEach(({ c, r }) => r.addEventListener('change', () => { local().cat = c.key; changed(); }));
     rw.addEventListener('change', () => { local().rewritten = rw.checked; changed(); });
-    delBtn.addEventListener('click', async () => {
-      const item = session.items && session.items[id];
-      if (!item) { delete pending[id]; savePending(); el.remove(); rows.delete(id); return; }
-      if (item.sources) { alert('合併後的題目要在合併階段處理（v0.2）。'); return; }
-      if (!confirm(`確定刪除這一題？\n\n${item.text}`)) return;
-      delete pending[id]; savePending(); clearTimeout(timers.get(id));
-      set(ref(db, `sessions/${code}/items/${id}`), null)
-        .catch((e) => alert(isPermissionDenied(e) ? '沒有權限刪除這一題' : `刪除失敗：${e.message}`));
-    });
+    sel.addEventListener('change', () => { if (sel.checked) selected.add(id); else selected.delete(id); paintMergeBar(); });
     function paintCat() {
       const cur = (pending[id] && pending[id].cat) || (session.items && session.items[id] && session.items[id].cat);
-      const c = cur && catOf(cfg, cur);
+      const c = cur && catOf(cfg(), cur);
       el.style.borderLeftColor = c ? c.color : 'var(--line)';
     }
-    const row = {
+    return {
       el,
       state(kind, text) { stateEl.className = `state ${kind}`; stateEl.textContent = text; },
-      update(item, canEdit) {
-        const d = pending[id];
-        const v = d || pick(item);
+      update(item, acts) {
+        const v = pending[id] || pick(item);
         if (document.activeElement !== ta && ta.value !== (v.text || '')) ta.value = v.text || '';
-        radios.forEach(({ c, r }) => { r.checked = v.cat === c.key; r.disabled = !canEdit; });
-        rw.checked = Boolean(v.rewritten); rw.disabled = !canEdit;
-        ta.readOnly = !canEdit; delBtn.hidden = !canEdit;
+        radios.forEach(({ c, r }) => { r.checked = v.cat === c.key; r.disabled = !acts.edit; });
+        rw.checked = Boolean(v.rewritten); rw.disabled = !acts.edit;
+        ta.readOnly = !acts.edit;
+        selLabel.hidden = !acts.select; sel.checked = selected.has(id);
+        splitBtn.hidden = !acts.split; unmergeBtn.hidden = !acts.unmerge; delBtn.hidden = !acts.delete;
         groupsEl.textContent = item ? L.groupLabel(item.groups) : L.groupLabel({ [group]: true });
-        counter.textContent = `${[...ta.value].length}/${maxLen}`;
+        const srcs = item && item.sources ? Object.keys(item.sources) : [];
+        sourcesEl.textContent = srcs.length ? `合併自：${srcs.map((s) => { const x = session.items[s]; return x ? `「${x.text}」（${L.groupLabel(x.groups)}）` : '（已刪除）'; }).join('、')}` : '';
+        counter.textContent = `${[...ta.value].length}/${maxLen()}`;
         paintCat();
       },
       focus() { ta.focus(); },
     };
-    row.update(session.items && session.items[id], editable);
-    return row;
   }
-  const pick = (it) => (it ? { text: it.text, cat: it.cat, rewritten: Boolean(it.rewritten) } : { text: '', cat: '', rewritten: false });
 
   addBtn.addEventListener('click', () => {
-    const id = push(ref(db, `sessions/${code}/items`)).key;
+    const id = push(itemsRef()).key;
     pending[id] = { text: '', cat: '', rewritten: false, isNew: true };
     savePending();
     render();
     const r = rows.get(id); if (r) { r.focus(); r.state('', '輸入後自動儲存'); }
   });
 
+  function sectionFor(key, label, c) {
+    if (!sections.has(key)) {
+      const head = h('h3', { class: 'section-h' });
+      const list = h('div');
+      sections.set(key, { wrap: h('div', { class: 'section' }, head, list), list, head });
+    }
+    const s = sections.get(key);
+    s.head.hidden = !label;
+    s.head.textContent = label || '';
+    if (c) Object.assign(s.head.style, { background: c.color, color: c.textColor });
+    return s;
+  }
+
+  function paintMergeBar() {
+    const type = session && session.meta.phase && session.meta.phase.type;
+    mergeBar.hidden = !(type === 'merge' && session.meta.visibility === 'live');
+    const n = selected.size;
+    const check = L.canMerge(session ? session.items : {}, [...selected]);
+    mergeInfo.textContent = n === 0 ? '勾選同一分類的 2 題以上，再按「合併」。'
+      : n === 1 ? '已選 1 題，再選 1 題以上。' : check.ok ? `已選 ${n} 題` : `已選 ${n} 題：${check.error}`;
+    mergeInfo.className = `grow ${n >= 2 && !check.ok ? 'warntext' : ''}`;
+    mergeBtn.disabled = !check.ok;
+    clearBtn.hidden = n === 0;
+  }
+
   function render() {
     if (!session) return;
     const { meta } = session;
     const items = session.items || {};
     const type = meta.phase && meta.phase.type;
+    const live = meta.visibility === 'live';
     title.textContent = meta.title;
     sub.textContent = `第 ${group} 組小幫手｜${phaseLabel(meta)}`;
-    const editableNow = type === 'collect' || type === 'merge';
     banner.replaceChildren(...[
-      editableNow ? null : msg('info', '目前階段不能編輯題目。'),
-      type === 'merge' ? msg('info', '合併階段可以修改所有組的題目；合併、拆回功能在 v0.2 加入。') : null,
-      meta.visibility !== 'live' ? msg('warn', '場次目前不是「進行中」，無法寫入。') : null].filter(Boolean));
-    addBtn.hidden = !L.canHelperEdit(type, group, null) || type === 'merge';
+      type === 'merge' ? msg('info', '合併階段：可以修改、合併、拆回、複製到另一類所有組的題目。分類寫錯時先改分類，同一分類的題目才能合併。') : null,
+      type !== 'collect' && type !== 'merge' ? msg('info', '目前階段不能編輯題目。') : null,
+      !live ? msg('warn', '場次目前不是「進行中」，無法寫入。') : null].filter(Boolean));
+    addBtn.hidden = !(live && type === 'collect');
+    listHead.textContent = type === 'merge' ? '全部題目（依分類）' : `第 ${group} 組的題目`;
 
-    // 我的（收集）或全部（合併）＋本機還沒送出的新題
-    const mineIds = Object.keys(items).filter((id) => items[id].status === 'active'
+    // 已經不是 active 的題目：取消勾選、丟掉沒送出的草稿
+    for (const id of [...selected]) if (type !== 'merge' || !items[id] || items[id].status !== 'active') selected.delete(id);
+    let dropped = false;
+    for (const id of Object.keys(pending)) if (items[id] && items[id].status !== 'active') { delete pending[id]; dropped = true; }
+    if (dropped) savePending();
+
+    const ids = Object.keys(items).filter((id) => items[id].status === 'active'
       && (type === 'merge' || (items[id].groups && items[id].groups[String(group)])));
-    for (const id of Object.keys(pending)) if (!items[id] && pending[id].isNew && !mineIds.includes(id)) mineIds.push(id);
-    mineIds.sort((a, b) => ((items[a] && items[a].createdAt) || Infinity) - ((items[b] && items[b].createdAt) || Infinity) || a.localeCompare(b));
-    const keep = new Set(mineIds);
-    for (const [id, r] of rows) if (!keep.has(id)) { r.el.remove(); rows.delete(id); }
-    for (const id of mineIds) {
-      const canEdit = meta.visibility === 'live' && L.canHelperEdit(type, group, items[id] || null);
-      let r = rows.get(id);
-      if (!r) { r = makeRow(id, canEdit); rows.set(id, r); } else r.update(items[id], canEdit);
-      mineBox.append(r.el); // 依序排列
-    }
-    if (!mineIds.length) mineBox.replaceChildren(h('p', { class: 'sub' }, '還沒有題目，按「新增一題」開始。'));
-    else [...mineBox.children].forEach((c) => { if (!c.classList.contains('item')) c.remove(); });
+    for (const id of Object.keys(pending)) if (!items[id] && pending[id].isNew && !ids.includes(id)) ids.push(id);
+    ids.sort((a, b) => ((items[a] && items[a].createdAt) || Infinity) - ((items[b] && items[b].createdAt) || Infinity) || a.localeCompare(b));
+    for (const [id, r] of rows) if (!ids.includes(id)) { r.el.remove(); rows.delete(id); }
 
-    // 其他組（唯讀）
+    const cats = meta.config.categories;
+    const defs = type === 'merge' ? cats.map((c) => ({ key: c.key, label: c.label, c })) : [{ key: 'mine' }];
+    const buckets = new Map(defs.map((d) => [d.key, []]));
+    for (const id of ids) {
+      const acts = live ? L.helperActions(type, group, items[id] || null) : { edit: false, split: false, select: false, unmerge: false, delete: false };
+      let r = rows.get(id);
+      if (!r) { r = makeRow(id); rows.set(id, r); }
+      r.update(items[id], acts);
+      const cat = (pending[id] && pending[id].cat) || (items[id] && items[id].cat);
+      const key = type === 'merge' ? (buckets.has(cat) ? cat : cats[0].key) : 'mine';
+      buckets.get(key).push(r.el);
+    }
+    const wraps = defs.map((d) => {
+      const s = sectionFor(d.key, d.label ? `${d.label}（${buckets.get(d.key).length}）` : '', d.c);
+      placeInOrder(s.list, buckets.get(d.key));
+      return s.wrap;
+    });
+    placeInOrder(mineBox, ids.length ? wraps : [emptyEl]);
+
+    // 其他組（唯讀，只在收集階段顯示）
+    othersWrap.hidden = type === 'merge';
     const others = L.itemsByGroup(items, meta.groupCount).filter((g) => g.group !== group);
     othersBox.replaceChildren(...others.map((g) => h('div', {}, h('h2', {}, `第 ${g.group} 組`),
       g.items.length ? g.items.map((it) => h('div', { class: 'item', style: { borderLeftColor: (catOf(meta.config, it.cat) || {}).color } },
         it.text, h('div', { class: 'meta' }, catChip(catOf(meta.config, it.cat)), it.rewritten ? h('span', { class: 'sub' }, '已改寫') : null)))
         : h('p', { class: 'sub' }, '（無）'))));
+    paintMergeBar();
   }
 
   let resent = false;
@@ -437,27 +576,47 @@ async function viewHost(code) {
   let access = null;
   try { access = (await get(ref(db, `access/${code}/hosts/${uid}`))).val(); } catch { access = store.get(roleKey(code)); }
   if (!access) { location.hash = `#/s/${code}`; return; }
-  const body = h('div');
-  mount(h('div', { class: 'topbar' }, h('div', {}, h('h1', {}, '主持人'), h('p', { class: 'sub' }, `場次代碼 ${code}`)), connDot()), body);
+  const body = h('div'); const note = h('div');
+  mount(h('div', { class: 'topbar' }, h('div', {}, h('h1', {}, '主持人'), h('p', { class: 'sub' }, `場次代碼 ${code}`)), connDot()), note, body);
+
+  async function go(phase, label) {
+    if (!confirm(`切換到「${label}」？\n所有人的畫面會跟著改變。`)) return;
+    try { await set(ref(db, `sessions/${code}/meta/phase`), phase); note.replaceChildren(); }
+    catch (e) { note.replaceChildren(msg('err', isPermissionDenied(e) ? '沒有權限切換階段：PIN 可能已更換，或場次不是「進行中」。請重新進入。' : `切換失敗：${e.message}`)); }
+  }
+
   watchSession(code, (s) => {
     const { meta } = s;
     const items = s.items || {};
-    const cats = meta.config.categories;
+    const cfg = meta.config;
+    const cats = cfg.categories;
+    const idx = meta.phase.index;
+    const prev = L.nextPhase(cfg, items, idx, -1);
+    const next = L.nextPhase(cfg, items, idx, 1);
+    const labelOf = (p) => cfg.phases[p.index].label;
     const byGroup = L.itemsByGroup(items, meta.groupCount);
     const warn = L.dupNameWarnings(s.participants);
+    const hasActive = (cat) => Object.values(items).some((it) => it.status === 'active' && it.cat === cat);
     body.replaceChildren(
       h('div', { class: 'card' },
         h('h2', {}, meta.title),
-        h('p', {}, `目前階段：${phaseLabel(meta)}（第 ${meta.phase.index + 1}／${meta.config.phases.length} 階段）`),
+        h('ol', { class: 'phases' }, cfg.phases.map((p, i) => h('li', { class: i === idx ? 'cur' : '' },
+          p.label,
+          p.type === 'vote' && !hasActive(p.category) ? h('span', { class: 'sub' }, '（這一類沒有題目，會跳過）') : null,
+          i === idx ? h('strong', {}, '　← 目前') : null))),
         h('div', { class: 'row' },
-          h('button', { class: 'primary', onclick: () => window.open(`#/s/${code}/screen`, `screen-${code}`) }, '開啟投影畫面')),
-        h('p', { class: 'sub' }, '切換階段、開關投票的功能在 v0.2、v0.3 加入。')),
+          h('button', { disabled: !prev, onclick: () => go(prev, labelOf(prev)) }, prev ? `◀ 回到「${labelOf(prev)}」` : '◀ 已是第一個階段'),
+          h('button', { class: 'primary', disabled: !next, onclick: () => go(next, labelOf(next)) }, next ? `前往「${labelOf(next)}」 ▶` : '已是最後一個階段')),
+        next && next.type === 'vote' ? h('p', { class: 'sub' }, '投票畫面在 v0.3 加入；目前切到投票階段時，參與者只會看到等待畫面。') : null,
+        h('div', { class: 'row' },
+          h('button', { onclick: () => window.open(`#/s/${code}/screen`, `screen-${code}`) }, '開啟投影畫面'))),
       h('div', { class: 'card' }, h('h2', {}, '各組題數'),
         h('table', {},
           h('thead', {}, h('tr', {}, h('th', {}, '組別'), cats.map((c) => h('th', { class: 'num' }, c.label)), h('th', { class: 'num' }, '合計'))),
           h('tbody', {}, byGroup.map((g) => h('tr', {}, h('td', {}, `第 ${g.group} 組`),
             cats.map((c) => h('td', { class: 'num' }, g.items.filter((it) => it.cat === c.key).length)),
-            h('td', { class: 'num' }, g.items.length)))))),
+            h('td', { class: 'num' }, g.items.length))))),
+        h('p', { class: 'sub' }, '合併後的題目會算在每一個來源組。')),
       h('div', { class: 'card' }, h('h2', {}, '參與者'),
         h('p', {}, `已加入 ${Object.keys(s.participants || {}).length} 人`),
         warn.length ? msg('warn', `同組同名：${warn.map((w) => `第 ${w.group} 組「${w.name}」×${w.uids.length}`).join('、')}`) : null));
