@@ -224,6 +224,10 @@ flowchart LR
     name: string, group: number
     v1?: itemId, v2?: itemId, v3?: itemId     # 最多 3 個，不能重複
     ts: serverTimestamp
+    hostEdited?: true, editedAt?: serverTimestamp   # T30：主持人調整過；代投的 uid 以 host- 開頭
+  voteLog/{logId}:                # T30：選票調整紀錄，只能新增、不能修改或刪除
+    action: "edit"|"delete"|"add", cat, voterId, name, group
+    before?: {v1,v2,v3}, after?: {v1,v2,v3}, by: uid, at: serverTimestamp
   participants/{uid}:
     name: string, group: number, joinedAt: serverTimestamp
 
@@ -261,7 +265,7 @@ flowchart LR
 ```
 驗證規則：分類的 key 不能重複；`phases` 裡的 category 必須存在；`groups.count` 介於 1～`max`，且 max ≤ 8；`maxPerVoter` 介於 1～10。驗證失敗時拒絕匯入，並列出所有錯誤。
 
-## B5. 安全規則（v0.1 定稿，2026/11/20 經 Mike 同意）
+## B5. 安全規則（v0.1 定稿 2026/11/20；v0.4 新增 T30 主持人調整選票）
 
 ```json
 {
@@ -273,8 +277,12 @@ flowchart LR
         ".write": "auth != null && auth.uid === 'OWNER_UID'",
         "meta": {
           ".write": "auth != null && auth.uid === 'OWNER_UID'",
-          "visibility": { ".validate": "newData.val() === 'private' || newData.val() === 'live' || newData.val() === 'demo'" },
-          "groupCount": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 8" },
+          "visibility": {
+            ".validate": "newData.val() === 'private' || newData.val() === 'live' || newData.val() === 'demo'"
+          },
+          "groupCount": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 8"
+          },
           "phase": {
             ".write": "auth != null && (auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
           }
@@ -282,21 +290,43 @@ flowchart LR
         "items": {
           "$id": {
             ".write": "auth != null && (auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('secrets/'+$code+'/helperPin').exists() && root.child('access/'+$code+'/helpers/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/helperPin').val() && (root.child('sessions/'+$code+'/meta/phase/type').val() === 'merge' || (root.child('sessions/'+$code+'/meta/phase/type').val() === 'collect' && (!data.exists() || data.child('groups/'+root.child('access/'+$code+'/helpers/'+auth.uid+'/group').val()).exists()) && (!newData.exists() || newData.child('groups/'+root.child('access/'+$code+'/helpers/'+auth.uid+'/group').val()).exists())))))",
-            "text": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 150" }
+            "text": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 150"
+            }
           }
         },
         "votes": {
           "$cat": {
             "$uid": {
-              ".write": "auth != null && auth.uid === $uid && root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'vote' && root.child('sessions/'+$code+'/meta/phase/category').val() === $cat",
+              ".write": "auth != null && ((auth.uid === $uid && root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'vote' && root.child('sessions/'+$code+'/meta/phase/category').val() === $cat) || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'results' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val()))",
               ".validate": "newData.hasChildren(['name','group','ts'])",
-              "v1": { ".validate": "auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
-              "v2": { ".validate": "auth.uid === 'OWNER_UID' || (newData.val() !== newData.parent().child('v1').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
-              "v3": { ".validate": "auth.uid === 'OWNER_UID' || (newData.val() !== newData.parent().child('v1').val() && newData.val() !== newData.parent().child('v2').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)" },
-              "name":  { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30" },
-              "group": { ".validate": "newData.isNumber()" },
-              "ts":    { ".validate": "auth.uid === 'OWNER_UID' || newData.val() === now" },
-              "$other": { ".validate": false }
+              "v1": {
+                ".validate": "auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)"
+              },
+              "v2": {
+                ".validate": "auth.uid === 'OWNER_UID' || (newData.val() !== newData.parent().child('v1').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)"
+              },
+              "v3": {
+                ".validate": "auth.uid === 'OWNER_UID' || (newData.val() !== newData.parent().child('v1').val() && newData.val() !== newData.parent().child('v2').val() && root.child('sessions/'+$code+'/items/'+newData.val()+'/status').val() === 'active' && root.child('sessions/'+$code+'/items/'+newData.val()+'/cat').val() === $cat)"
+              },
+              "name": {
+                ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30"
+              },
+              "group": {
+                ".validate": "newData.isNumber()"
+              },
+              "ts": {
+                ".validate": "auth.uid === 'OWNER_UID' || newData.val() === now || (data.exists() && newData.val() === data.val())"
+              },
+              "hostEdited": {
+                ".validate": "newData.val() === true && (auth.uid === 'OWNER_UID' || (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'results' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
+              },
+              "editedAt": {
+                ".validate": "auth.uid === 'OWNER_UID' || (newData.val() === now && (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'results' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
+              },
+              "$other": {
+                ".validate": false
+              }
             }
           }
         },
@@ -304,29 +334,52 @@ flowchart LR
           "$uid": {
             ".write": "auth != null && auth.uid === $uid && root.child('sessions/'+$code+'/meta/visibility').val() === 'live'"
           }
+        },
+        "voteLog": {
+          "$id": {
+            ".write": "auth != null && !data.exists() && (root.child('sessions/'+$code+'/meta/visibility').val() === 'live' && root.child('sessions/'+$code+'/meta/phase/type').val() === 'results' && root.child('secrets/'+$code+'/hostPin').exists() && root.child('access/'+$code+'/hosts/'+auth.uid+'/pin').val() === root.child('secrets/'+$code+'/hostPin').val())",
+            ".validate": "newData.hasChildren(['action','cat','voterId','by','at'])",
+            "action": {
+              ".validate": "newData.val() === 'edit' || newData.val() === 'delete' || newData.val() === 'add'"
+            },
+            "by": {
+              ".validate": "auth.uid === 'OWNER_UID' || newData.val() === auth.uid"
+            },
+            "at": {
+              ".validate": "auth.uid === 'OWNER_UID' || newData.val() === now"
+            }
+          }
         }
       }
     },
     "access": {
       "$code": {
         ".write": "auth != null && auth.uid === 'OWNER_UID'",
-        "helpers": { "$uid": {
-          ".read": "auth != null && (auth.uid === $uid || auth.uid === 'OWNER_UID')",
-          ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && root.child('secrets/'+$code+'/helperPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/helperPin').val()))"
-        }},
-        "hosts": { "$uid": {
-          ".read": "auth != null && (auth.uid === $uid || auth.uid === 'OWNER_UID')",
-          ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && root.child('secrets/'+$code+'/hostPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
-        }}
+        "helpers": {
+          "$uid": {
+            ".read": "auth != null && (auth.uid === $uid || auth.uid === 'OWNER_UID')",
+            ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && root.child('secrets/'+$code+'/helperPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/helperPin').val()))"
+          }
+        },
+        "hosts": {
+          "$uid": {
+            ".read": "auth != null && (auth.uid === $uid || auth.uid === 'OWNER_UID')",
+            ".write": "auth != null && (auth.uid === 'OWNER_UID' || (auth.uid === $uid && root.child('secrets/'+$code+'/hostPin').exists() && newData.child('pin').val() === root.child('secrets/'+$code+'/hostPin').val()))"
+          }
+        }
       }
     },
     "secrets": {
-      "$code": { ".read": false, ".write": "auth != null && auth.uid === 'OWNER_UID'" }
+      "$code": {
+        ".read": false,
+        ".write": "auth != null && auth.uid === 'OWNER_UID'"
+      }
     }
   }
 }
 ```
 - `OWNER_UID` 在設定步驟 4 換成擁有者的 UID（T22）。
+- **v0.4（T30）**：主持人（PIN 正確）在**結果階段**可以寫入、刪除任何一張選票；選票仍要通過 v1～v3 的檢查（active、同類、不重複）。主持人修改時 `ts` 可以沿用原值，`hostEdited`、`editedAt` 只有主持人在結果階段（或擁有者）能寫。`voteLog` 只能由主持人在結果階段新增、`by` 必須是自己、`at` 必須是伺服器時間，寫入後不能修改或刪除。
 - 已知的限制：「每段最多 min(3, n) 票」的 n 由前端檢查，規則只限制最多 3 票（v1～v3）。
 - 正確的 PIN 只會被寫在本人的 `access/{code}/...` 下，而這個路徑只有本人和擁有者能讀；`secrets` 一律不能讀取。
 - 正本是 `database.rules.json`；這裡的內容和它相同（只有 UID 換成 `OWNER_UID`）。已用 Firebase emulator 加上 `@firebase/rules-unit-testing` 驗證 B8 的全部權限案例（`tests/rules.test.js`）。
@@ -355,11 +408,14 @@ flowchart LR
 | `dupNameWarnings(participants)` | | 同組又同名的清單 | T3 |
 | `validateBallot(config, items, cat, ids)` | 勾選的題目 id | `{ok, error, ballot}`，ballot＝`{v1, v2, v3}` | R1；至少 1 題、不重複、都是該類 active 題目 |
 | `voterCount(votes)` | 該類的選票 | 投票人數 | A5 |
-| `buildXlsxSheets(session, exportedAt)` | | 四張工作表的列資料 | B7 |
+| `planBallotAdjust(config, items, votes, phaseType, cat, action, opts)` | action：edit／delete／add | `{ok, error, ballot, log}` | T30；只在結果階段；ballot 套用 R1 |
+| `ballotNote(voterId, ballot)` | | 「主持人修改」／「主持人代投」／空字串 | T30 |
+| `rehearsalItems(list, config, groupCount, now)` | 示範題目清單 | items | 彩排種子資料（v0.4） |
+| `buildXlsxSheets(session, exportedAt)` | | 五張工作表的列資料 | B7 |
 
 ## B7. 匯出與匯入格式
 
-- **JSON**：`{ tool: "concern-board", schemaVersion: 1, exportedAt, session: { code, meta, items, votes, participants } }`。**不包含** `access` 和 `secrets`。
+- **JSON**：`{ tool: "concern-board", schemaVersion: 1, exportedAt, session: { code, meta, items, votes, participants, voteLog } }`（`voteLog` 於 v0.4 加入，舊檔沒有時視為空）。**不包含** `access` 和 `secrets`。
   - 匯入時，`schemaVersion` 比程式新就拒絕；比程式舊就經過 migrate 函式轉換（v1 還不需要）。
   - 匯入後一律設成 `visibility: "private"`；要覆蓋已存在的場次代碼時，先自動匯出原場次。
 - **XLSX**（檔名 `{title}_{code}_{yyyymmdd}.xlsx`）：
@@ -368,8 +424,9 @@ flowchart LR
 |---|---|
 | 建議關注點 | 分類、題目、組別、已改寫、票數、占比、名次、優先聚焦 |
 | 合併紀錄 | 合併後題目、來源題目、來源組別 |
-| 投票明細 | 分類、姓名、組別、所投題目 1～3、時間 |
+| 投票明細 | 分類、姓名、組別、所投題目 1～3、時間、備註（T30：主持人修改／主持人代投） |
 | 場次資訊 | 標題、代碼、模板、階段、匯出時間、投票人數 |
+| 選票調整紀錄（v0.4，T30） | 時間、動作（修改／刪除／代為投票）、分類、姓名、組別、調整前、調整後 |
 
 ## B8. 驗證方式
 
@@ -392,6 +449,8 @@ flowchart LR
 | G13 | 合併時選用 A 的原文字；另一次自己改寫 | 選用原文字：A、B 都沒改寫時 false，其中一題已改寫時 true；自己改寫：true（T25） |
 | G14 | 該類只有 2 題時選 3 題；選 0 題；選同一題兩次；選別類或已合併的題目 | validateBallot 全部拒絕；選 1～2 題通過（R1） |
 | G15 | 一個有合併、有投票的場次 | buildXlsxSheets 的四張表欄位與 B7 相同；合併紀錄每個來源一列；總票數 0 的類占比為「—」 |
+| G16 | 結果階段修改、刪除、代投；投票階段調整；改成已合併的題目；代投沒有姓名 | 結果階段的三種調整通過並產生紀錄；其他拒絕；XLSX 備註與調整紀錄正確（T30） |
+| G17 | 彩排示範題目，組數 5 與 3 | 5 組時 10 題、3 組時略過第 4、5 組 |
 
 **權限測試（`tests/rules.test.js`，用 emulator）**：
 - 私人場次：非擁有者讀取失敗
@@ -401,6 +460,7 @@ flowchart LR
 - PIN 錯誤時：寫入 `access` 失敗
 - 讀取 `secrets`：一律失敗
 - 投票：非投票階段寫入失敗；第 4 票（v4）失敗；同一題投兩次失敗；投給別的分類的題目失敗
+- 主持人調整選票（T30）：結果階段可以修改、刪除、代投並寫紀錄；投票階段不行；小幫手、參與者不行；不能改成已合併或別類的題目；紀錄不能修改、刪除、冒名；參與者不能自己標示「主持人修改」
 
 **實機測試**：
 - 用 5 個分頁同時輸入
@@ -416,7 +476,7 @@ flowchart LR
 | v0.1 | 專案骨架、`logic.js`、安全規則與測試、擁有者 `#/admin`（Google 登入、建立場次、可見性、PIN）、加入場次（PIN、組別、姓名）、收集階段、投影（依組別／依分類）、即時存檔、JSON 匯出入 | G6～G9 通過；權限測試全部通過；5 個分頁同時輸入正常 |
 | v0.2 | 階段控制、合併、拆回、刪除合併項目（T20）、複製到另一類（T24） | G6、G7、G10～G13 通過；收集與合併的權限差異正確 |
 | v0.3 | 分段投票、改票、隱藏票數、結果並排、XLSX、QR code | G1～G5、G14、G15 通過；模擬 30 人投票的結果正確 |
-| v0.4 | 主持人調整選票（T30；含安全規則、B3 `voteLog`、B7 投票明細「備註」欄，需重新部署規則）、同名警示、刪除前自動備份、彩排種子資料、列印題目清單、連線燈號 | 12/4～12/8 彩排一次通過 |
+| v0.4 | 主持人調整選票（T30；含安全規則、B3 `voteLog`、B7 投票明細「備註」欄，需重新部署規則）、同名警示、刪除前自動備份、彩排種子資料、列印題目清單、連線燈號 | G16、G17 通過；T30 權限測試通過；12/4～12/8 彩排一次通過（含 iPhone、Android 實機掃 QR code） |
 | v1.x | 設定檔編輯器、更多模板 | — |
 
 每個版本：開一個分支開發 → 自我驗證 → 提供 release note → Mike 確認後合併進 main 並部署。

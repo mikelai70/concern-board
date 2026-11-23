@@ -19,9 +19,11 @@ app.js                # 畫面邏輯、Firebase 讀寫、即時存檔、匯出�
 logic.js              # 純函式：tally、rankCompetition、maxVotes、mergeItems、unmerge、validateConfig、匯出入轉換、nextPhase、dupNameWarnings
 vendor/qrcode.js      # 內嵌的 QR code 套件
 config/templates/prmc-workshop.json
+config/templates/prmc-workshop.rehearsal.json  # 彩排示範題目（假資料）
 database.rules.json   # 安全規則；OWNER_UID 由 Mike 提供
 firebase.json, .firebaserc
-tests/golden.test.js  # G1～G15
+firebase.test.json    # 權限測試專用的 emulator 連接埠（19000／19099），不會和 npm run dev 衝突
+tests/golden.test.js  # G1～G17
 tools/                # dev.js（本機練習環境）、serve.js、sim-helpers.js、sim-voters.js
 tests/rules.test.js   # 權限測試（emulator）
 docs/spec.md          # 規格

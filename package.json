@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "test:golden": "node --test tests/golden.test.js",
-    "test:rules": "firebase emulators:exec --only database,auth --project demo-concern-board \"node --test tests/rules.test.js\"",
+    "test:rules": "firebase emulators:exec --config firebase.test.json --only database,auth --project demo-concern-board \"node --test tests/rules.test.js\"",
     "test": "npm run test:golden && npm run test:rules",
     "serve": "node tools/serve.js",
     "dev": "node tools/dev.js"

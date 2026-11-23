@@ -141,6 +141,48 @@ export function validateBallot(config, items, cat, ids) {
   }
   return { ok: true, error: null, ballot: Object.fromEntries(list.map((id, i) => [VOTE_KEYS[i], id])) };
 }
+/**
+ * T30：主持人在結果階段調整選票。action：'edit'（修改）、'delete'（刪除）、'add'（代為投票）。
+ * 回傳 { ok, error, ballot, log }：ballot 是要寫入的選票（刪除時 null，不含時間欄位），
+ * log 是要寫入 voteLog 的紀錄（不含 at）。時間欄位由呼叫端用伺服器時間補上。
+ * opts：{ voterId（add 時必須以 host- 開頭）, ids, name, group, by }
+ */
+export function planBallotAdjust(config, items, votes, phaseType, cat, action, opts = {}) {
+  const fail = (error) => ({ ok: false, error, ballot: null, log: null });
+  if (phaseType !== 'results') return fail('只有在結果階段才能調整選票');
+  if (!config.categories.some((c) => c.key === cat)) return fail('分類不存在');
+  const id = opts.voterId;
+  const before = votes && votes[id];
+  const pick = (b) => (b ? Object.fromEntries(VOTE_KEYS.filter((k) => b[k]).map((k) => [k, b[k]])) : null);
+  const base = { action, cat, voterId: id, by: opts.by ?? null };
+  if (action === 'delete') {
+    if (!before) return fail('找不到這張選票');
+    return { ok: true, error: null, ballot: null, log: { ...base, name: before.name, group: before.group, before: pick(before), after: null } };
+  }
+  const v = validateBallot(config, items, cat, opts.ids);
+  if (!v.ok) return fail(v.error);
+  if (action === 'edit') {
+    if (!before) return fail('找不到這張選票');
+    const ballot = { name: before.name, group: Number(before.group), ...v.ballot, hostEdited: true };
+    return { ok: true, error: null, ballot, log: { ...base, name: before.name, group: Number(before.group), before: pick(before), after: v.ballot } };
+  }
+  if (action === 'add') {
+    if (!String(id || '').startsWith('host-')) return fail('代投的選票代號必須以 host- 開頭');
+    if (before) return fail('這個代號已經有選票');
+    const name = normalizeName(opts.name);
+    const group = Number(opts.group);
+    if (!name || name.length > 30) return fail('請輸入姓名（30 字以內）');
+    if (!Number.isInteger(group) || group < 1) return fail('請選擇組別');
+    return { ok: true, error: null, ballot: { name, group, ...v.ballot, hostEdited: true }, log: { ...base, name, group, before: null, after: v.ballot } };
+  }
+  return fail(`不認得的動作：${action}`);
+}
+/** 選票的備註（T30）：主持人代投／主持人修改／空字串 */
+export function ballotNote(voterId, ballot) {
+  if (!ballot || !ballot.hostEdited) return '';
+  return String(voterId).startsWith('host-') ? '主持人代投' : '主持人修改';
+}
+
 /** 某一類的投票人數 */
 export function voterCount(votes) {
   return Object.keys(votes || {}).length;
@@ -361,7 +403,7 @@ export function nextPhase(config, items, index, dir = 1) {
 }
 
 // ---------- B7：JSON 匯出、匯入 ----------
-/** session：{ code, meta, items, votes, participants }。只輸出這五項，不含 access、secrets。 */
+/** session：{ code, meta, items, votes, participants, voteLog }。只輸出這幾項，不含 access、secrets。voteLog 是 T30 的調整紀錄。 */
 export function toExportJson(session, exportedAt = Date.now()) {
   return {
     tool: TOOL,
@@ -373,6 +415,7 @@ export function toExportJson(session, exportedAt = Date.now()) {
       items: session.items || {},
       votes: session.votes || {},
       participants: session.participants || {},
+      voteLog: session.voteLog || {},
     },
   };
 }
@@ -408,6 +451,7 @@ export function fromImportJson(input) {
     items: s.items || {},
     votes: s.votes || {},
     participants: s.participants || {},
+    voteLog: s.voteLog || {},
   };
   return { ok: true, errors: [], session };
 }
@@ -420,7 +464,27 @@ export function exportFileName(title, code, date, ext) {
   return `${safe}_${code}_${ymd}.${ext}`;
 }
 
-// ---------- B7：XLSX 的四張工作表 ----------
+// ---------- 彩排示範題目 ----------
+/**
+ * 依示範題目清單產生 items（id 為 rh01、rh02…）；組別超過 groupCount、分類不在設定檔中的題目略過。
+ */
+export function rehearsalItems(list, config, groupCount, now = null) {
+  const cats = new Set(config.categories.map((c) => c.key));
+  const out = {};
+  (list || []).forEach((x, i) => {
+    const g = Number(x.group);
+    if (!Number.isInteger(g) || g < 1 || g > groupCount || !cats.has(x.cat)) return;
+    const t = normalizeItemText(x.text, (config.itemFields && config.itemFields.maxLength) || 150);
+    if (!t.ok) return;
+    out[`rh${String(i + 1).padStart(2, '0')}`] = {
+      text: t.value, cat: x.cat, groups: { [String(g)]: true }, rewritten: Boolean(x.rewritten), status: 'active',
+      createdBy: 'rehearsal', createdGroup: g, createdAt: now === null ? null : now + i, updatedAt: now, updatedBy: 'rehearsal',
+    };
+  });
+  return out;
+}
+
+// ---------- B7：XLSX 的工作表 ----------
 /** 時間格式：2026/12/11 15:07:03（使用執行環境的時區） */
 export function formatTime(ts) {
   if (!Number.isFinite(Number(ts)) || !ts) return '';
@@ -459,14 +523,23 @@ export function buildXlsxSheets(session, exportedAt = Date.now()) {
     }
   }
 
-  const detail = [['分類', '姓名', '組別', '所投題目 1', '所投題目 2', '所投題目 3', '時間']];
+  const detail = [['分類', '姓名', '組別', '所投題目 1', '所投題目 2', '所投題目 3', '時間', '備註']];
   for (const c of cfg.categories) {
-    const ballots = entries(votes[c.key]).map(([, b]) => b)
-      .sort((a, b) => (Number(a.group) - Number(b.group)) || String(a.name).localeCompare(String(b.name), 'zh-Hant'));
-    for (const b of ballots) {
+    const ballots = entries(votes[c.key])
+      .sort(([, a], [, b]) => (Number(a.group) - Number(b.group)) || String(a.name).localeCompare(String(b.name), 'zh-Hant'));
+    for (const [uid, b] of ballots) {
       const ids = ballotIds(b);
-      detail.push([c.label, b.name, Number(b.group), ids[0] ? textOf(ids[0]) : '', ids[1] ? textOf(ids[1]) : '', ids[2] ? textOf(ids[2]) : '', formatTime(b.ts)]);
+      detail.push([c.label, b.name, Number(b.group), ids[0] ? textOf(ids[0]) : '', ids[1] ? textOf(ids[1]) : '', ids[2] ? textOf(ids[2]) : '', formatTime(b.ts), ballotNote(uid, b)]);
     }
+  }
+
+  // T30：主持人調整選票的紀錄（依時間）
+  const actionText = { edit: '修改', delete: '刪除', add: '代為投票' };
+  const ballotText = (b) => ballotIds(b).map(textOf).join('、');
+  const log = [['時間', '動作', '分類', '姓名', '組別', '調整前', '調整後']];
+  for (const [, l] of entries(session.voteLog).sort(([, a], [, b]) => (Number(a.at) || 0) - (Number(b.at) || 0))) {
+    const c = cfg.categories.find((x) => x.key === l.cat);
+    log.push([formatTime(l.at), actionText[l.action] || l.action, c ? c.label : l.cat, l.name || '', l.group ?? '', ballotText(l.before), ballotText(l.after)]);
   }
 
   const phase = meta.phase && cfg.phases[meta.phase.index];
@@ -482,6 +555,7 @@ export function buildXlsxSheets(session, exportedAt = Date.now()) {
     { name: '合併紀錄', rows: merges },
     { name: '投票明細', rows: detail },
     { name: '場次資訊', rows: info },
+    { name: '選票調整紀錄', rows: log },
   ];
 }
 

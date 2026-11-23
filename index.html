@@ -120,6 +120,26 @@
   .scr-res .pri-tag { grid-column: 2 / 4; font-size: 18px; color: #ffd166; font-weight: 700; }
   .scr-res.pri { background: #26344a; }
   .scr-res.pri .rank { color: #ffd166; }
+  .scr-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  body.screen .dot { color: #9aa5b3; font-size: 16px; }
+
+  /* 主持人：調整選票 */
+  tr.dup td { background: #fff4e5; }
+  .pickrow { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+  .pickrow input { margin-top: 4px; }
+
+  /* 列印題目清單（A9） */
+  .print h1 { font-size: 24px; }
+  .print-cat { margin: 18px 0; break-inside: auto; }
+  .print-cat h2 { font-size: 18px; border-bottom: 2px solid #333; padding-bottom: 4px; }
+  .print table td, .print table th { border: 1px solid #999; padding: 8px; font-size: 15px; }
+  .print td.dots { width: 32%; }
+  .print tr { break-inside: avoid; }
+  @media print {
+    .noprint { display: none !important; }
+    html, body { background: #fff; }
+    #app { max-width: none; padding: 0; }
+  }
   @media (max-width: 600px) { #app { padding: 12px; } h1 { font-size: 20px; } }
 </style>
 </head>
