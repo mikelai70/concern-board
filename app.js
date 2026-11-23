@@ -337,7 +337,7 @@ async function viewHelper(code) {
   }
   addCleanup(() => timers.forEach((t) => clearTimeout(t)));
 
-  // ---- 合併、拆回、分拆、刪除：讀最新資料 → logic.js 算變更 → 一次寫入 ----
+  // ---- 合併、拆回、複製到另一類、刪除：讀最新資料 → logic.js 算變更 → 一次寫入 ----
   async function apply(compute) {
     let fresh;
     try { fresh = (await get(itemsRef())).val() || {}; } catch { fresh = (session && session.items) || {}; }
@@ -358,7 +358,7 @@ async function viewHelper(code) {
       const r = L.splitItem(fresh, id, cfg().categories, { newId, uid, group });
       return { [r.id]: r.item };
     });
-    if (ok) setTimeout(() => { const r = rows.get(newId); if (r) { r.focus(); r.state('', '已分拆：請改寫這兩題的文字'); } }, 300);
+    if (ok) setTimeout(() => { const r = rows.get(newId); if (r) { r.focus(); r.state('', '已複製到另一類：請把兩題各自改寫成只講一個面向'); } }, 300);
   }
   async function doUnmerge(id) {
     const n = Object.keys(session.items[id].sources || {}).length;
@@ -430,7 +430,7 @@ async function viewHelper(code) {
     const rw = h('input', { type: 'checkbox' });
     const groupsEl = h('span', { class: 'sub' });
     const sourcesEl = h('div', { class: 'sub sources' });
-    const splitBtn = h('button', { title: '內容橫跨兩類時，複製出一題到另一類（T24）', onclick: () => doSplit(id) }, '分拆');
+    const splitBtn = h('button', { title: '內容同時談到兩類時：複製一份到另一類，再把兩題各自改寫成只講一個面向（T24）', onclick: () => doSplit(id) }, '複製到另一類（並改寫描述）');
     const unmergeBtn = h('button', { onclick: () => doUnmerge(id) }, '拆回');
     const delBtn = h('button', { class: 'danger', onclick: () => doDelete(id) }, '刪除');
     const el = h('div', { class: 'item' }, h('div', { class: 'row' }, selLabel, h('span', { class: 'grow' })), ta,
@@ -514,7 +514,7 @@ async function viewHelper(code) {
     title.textContent = meta.title;
     sub.textContent = `第 ${group} 組小幫手｜${phaseLabel(meta)}`;
     banner.replaceChildren(...[
-      type === 'merge' ? msg('info', '合併階段：可以修改、合併、拆回、分拆所有組的題目。分類寫錯時先改分類，同一分類的題目才能合併。') : null,
+      type === 'merge' ? msg('info', '合併階段：可以修改、合併、拆回、複製到另一類所有組的題目。分類寫錯時先改分類，同一分類的題目才能合併。') : null,
       type !== 'collect' && type !== 'merge' ? msg('info', '目前階段不能編輯題目。') : null,
       !live ? msg('warn', '場次目前不是「進行中」，無法寫入。') : null].filter(Boolean));
     addBtn.hidden = !(live && type === 'collect');

@@ -80,7 +80,7 @@ export function canHelperEdit(phaseType, helperGroup, item) {
 
 /**
  * 小幫手對一題能做哪些事（畫面依此顯示按鈕）。
- * 合併、拆回、刪除合併後的題目只在合併階段（A5、T20）；分拆依 T24（收集限本組、合併所有組）。
+ * 合併、拆回、刪除合併後的題目只在合併階段（A5、T20）；複製到另一類依 T24（收集限本組、合併所有組，合併後的題目不行）。
  */
 export function helperActions(phaseType, helperGroup, item) {
   const edit = canHelperEdit(phaseType, helperGroup, item);
@@ -88,7 +88,7 @@ export function helperActions(phaseType, helperGroup, item) {
   const inMerge = phaseType === 'merge';
   return {
     edit,
-    split: edit && Boolean(item) && isActive(item),
+    split: edit && Boolean(item) && isActive(item) && !merged,
     select: inMerge && Boolean(item) && isActive(item),
     unmerge: inMerge && merged,
     delete: edit && (!merged || inMerge),
@@ -242,12 +242,13 @@ export function deleteItem(items, id, mode = 'unmerge', opts = {}) {
 }
 
 /**
- * T24：分拆。複製出一個新項目：組別相同、分類為設定檔中的下一類、rewritten=true、文字沿用。
+ * T24：複製到另一類（原名「分拆」）。複製出一個新項目：組別相同、分類為設定檔中的下一類、rewritten=true、文字沿用。
  * 不記錄來源關係。opts：{ newId, uid, group, now }
  */
 export function splitItem(items, id, categories, opts = {}) {
   const it = items[id];
-  if (!isActive(it)) throw new Error('只能分拆目前有效的題目');
+  if (!isActive(it)) throw new Error('只能複製目前有效的題目');
+  if (it.sources) throw new Error('合併後的題目要先拆回，再對其中一題使用「複製到另一類」');
   if (!opts.newId) throw new Error('缺少新項目的 id');
   const keys = categories.map((c) => c.key);
   const i = keys.indexOf(it.cat);

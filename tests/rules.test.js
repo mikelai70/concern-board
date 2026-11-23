@@ -134,7 +134,7 @@ test('小幫手在收集階段：合併含別組的題目失敗（整筆被拒�
   await env.withSecurityRulesDisabled(async (ctx) => { status = (await ctx.database().ref('sessions/LIVE01/items/a1/status').get()).val(); });
   if (status !== 'active') throw new Error(`原題被改動了：${status}`);
 });
-test('小幫手在合併階段：跨組合併、拆回、分拆都成功', async () => {
+test('小幫手在合併階段：跨組合併、拆回、複製到另一類都成功', async () => {
   await seed({ phase: { index: 1, type: 'merge' } });
   const h = as('helper1');
   await assertSucceeds(mergeWrite(h, 'LIVE01', ['a1', 'b2'], 'mx', { 1: true, 2: true }));
@@ -143,7 +143,7 @@ test('小幫手在合併階段：跨組合併、拆回、分拆都成功', async
   }));
   await assertSucceeds(h.ref('sessions/LIVE01/items/sp1').set({ text: '第二組的題目', cat: 'cost', groups: { 2: true }, rewritten: true, status: 'active' }));
 });
-test('小幫手在收集階段：分拆本組題目成功，分拆別組題目失敗（T24）', async () => {
+test('小幫手在收集階段：複製本組題目到另一類成功，別組題目失敗（T24）', async () => {
   const h = as('helper1');
   await assertSucceeds(h.ref('sessions/LIVE01/items/sp1').set({ text: '第一組的題目', cat: 'cost', groups: { 1: true }, rewritten: true, status: 'active' }));
   await assertFails(h.ref('sessions/LIVE01/items/sp2').set({ text: '第二組的題目', cat: 'cost', groups: { 2: true }, rewritten: true, status: 'active' }));

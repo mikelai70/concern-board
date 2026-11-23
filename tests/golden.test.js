@@ -132,7 +132,7 @@ test('G10：不同分類不能合併（T23）', () => {
   assert.equal(canMerge(items, ['A']).ok, false);
 });
 
-test('G11：分拆（T24）', () => {
+test('G11：複製到另一類（T24）', () => {
   const items = { A: { text: '甲乙都有', cat: 'impact', groups: { 2: true }, rewritten: false, status: 'active' } };
   const { id, item } = splitItem(items, 'A', config.categories, { newId: 'S' });
   assert.equal(id, 'S');
@@ -143,6 +143,7 @@ test('G11：分拆（T24）', () => {
   assert.ok(!('sources' in item));
   assert.equal(splitItem({ B: { ...items.A, cat: 'cost' } }, 'B', config.categories, { newId: 'T' }).item.cat, 'impact');
   assert.throws(() => splitItem({ C: { ...items.A, status: 'merged' } }, 'C', config.categories, { newId: 'U' }));
+  assert.throws(() => splitItem({ M: { ...items.A, sources: { a: true, b: true } } }, 'M', config.categories, { newId: 'V' }), /先拆回/, '合併後的題目要先拆回');
 });
 
 test('G12：刪除合併後的項目：cascade 連同來源、unmerge 拆回一層（T20）', () => {
@@ -172,7 +173,7 @@ test('G13：合併後的已改寫（T25）', () => {
   assert.equal(mergeItems(rw, ['A', 'B'], '甲', { newId: 'M' }).item.rewritten, true);
 });
 
-test('小幫手可以做的動作：合併、拆回只在合併階段；分拆依 T24', () => {
+test('小幫手可以做的動作：合併、拆回只在合併階段；複製到另一類依 T24', () => {
   const mine = { groups: { 2: true }, status: 'active' };
   const other = { groups: { 3: true }, status: 'active' };
   const merged = { groups: { 2: true, 3: true }, status: 'active', sources: { a: true, b: true } };
@@ -181,6 +182,8 @@ test('小幫手可以做的動作：合併、拆回只在合併階段；分拆�
   assert.equal(helperActions('collect', 2, merged).delete, false);
   assert.deepEqual(helperActions('merge', 2, other), { edit: true, split: true, select: true, unmerge: false, delete: true });
   assert.equal(helperActions('merge', 2, merged).unmerge, true);
+  assert.equal(helperActions('merge', 2, merged).split, false, '合併後的題目不提供複製到另一類');
+  assert.equal(helperActions('collect', 2, merged).split, false);
   assert.equal(helperActions('share', 2, mine).split, false);
 });
 
