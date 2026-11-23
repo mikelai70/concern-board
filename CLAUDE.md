@@ -21,7 +21,8 @@ vendor/qrcode.js      # 內嵌的 QR code 套件
 config/templates/prmc-workshop.json
 database.rules.json   # 安全規則；OWNER_UID 由 Mike 提供
 firebase.json, .firebaserc
-tests/golden.test.js  # G1～G9
+tests/golden.test.js  # G1～G15
+tools/                # dev.js（本機練習環境）、serve.js、sim-helpers.js、sim-voters.js
 tests/rules.test.js   # 權限測試（emulator）
 docs/spec.md          # 規格
 docs/release-notes.md # 每個版本的 release note
@@ -34,6 +35,7 @@ npm run test:golden                           # golden test
 npm run test:rules                            # 權限測試（自動啟動 emulator，需要 Java）
 npm run dev                                   # 本機預覽：emulator＋示範場次 TEST26＋網頁 http://localhost:8000/
 node tools/sim-helpers.js                     # （npm run dev 執行中）模擬 5 位小幫手同時輸入
+node tools/sim-voters.js                      # （npm run dev 執行中）模擬 30 人投票，比對 G1、G2
 npx firebase deploy --only database           # 部署安全規則（要先經 Mike 同意）
 ```
 - 給 Mike 的本機練習步驟（帳號、PIN、要檢查的畫面、常見問題）寫在 `README.md`；改動 `tools/dev.js` 時一併更新。

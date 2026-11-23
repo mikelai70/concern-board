@@ -120,6 +120,32 @@ export function maxVotes(config, items, cat) {
   return Math.min(Number(config.vote.maxPerVoter), n);
 }
 
+// ---------- 投票（R1、T4） ----------
+const VOTE_KEYS = ['v1', 'v2', 'v3'];
+/** 選票裡選了哪些題目（依 v1、v2、v3 順序） */
+export function ballotIds(ballot) {
+  return VOTE_KEYS.map((k) => ballot && ballot[k]).filter(Boolean);
+}
+/**
+ * 檢查參與者勾選的題目：至少 1 題、最多 maxVotes 題（R1）、不重複、都是該類 active 題目。
+ * 通過時回傳 ballot＝{ v1, v2, v3 }（只含有選的）。
+ */
+export function validateBallot(config, items, cat, ids) {
+  const list = (ids || []).filter(Boolean);
+  if (new Set(list).size !== list.length) return { ok: false, error: '同一題只能選一次', ballot: null };
+  if (list.length < 1) return { ok: false, error: '請至少選 1 題', ballot: null };
+  const max = maxVotes(config, items, cat);
+  if (list.length > max) return { ok: false, error: `最多選 ${max} 題`, ballot: null };
+  if (list.some((id) => !isActive(items && items[id]) || items[id].cat !== cat)) {
+    return { ok: false, error: '有題目已經不在這一類的投票清單，請重新選擇', ballot: null };
+  }
+  return { ok: true, error: null, ballot: Object.fromEntries(list.map((id, i) => [VOTE_KEYS[i], id])) };
+}
+/** 某一類的投票人數 */
+export function voterCount(votes) {
+  return Object.keys(votes || {}).length;
+}
+
 // ---------- R3 ----------
 /** competition ranking：同票同名次，下一名跳號。回傳和輸入同順序的名次。 */
 export function rankCompetition(counts) {
@@ -392,6 +418,71 @@ export function exportFileName(title, code, date, ext) {
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
   const safe = String(title || 'session').replace(/[\\/:*?"<>|]/g, '_');
   return `${safe}_${code}_${ymd}.${ext}`;
+}
+
+// ---------- B7：XLSX 的四張工作表 ----------
+/** 時間格式：2026/12/11 15:07:03（使用執行環境的時區） */
+export function formatTime(ts) {
+  if (!Number.isFinite(Number(ts)) || !ts) return '';
+  const d = new Date(Number(ts));
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+/** 結果的占比文字（T28、R2）：null → 「—」 */
+export function pctText(pct) {
+  return pct === null || pct === undefined ? '—' : `${pct}%`;
+}
+/**
+ * session：{ code, meta, items, votes, participants }。
+ * 回傳 [{ name, rows }]，rows 第一列是標題列；欄位依 B7。
+ */
+export function buildXlsxSheets(session, exportedAt = Date.now()) {
+  const meta = session.meta || {};
+  const cfg = meta.config;
+  const items = session.items || {};
+  const votes = session.votes || {};
+  const textOf = (id) => (items[id] ? items[id].text : '（已刪除）');
+
+  const summary = [['分類', '題目', '組別', '已改寫', '票數', '占比', '名次', '優先聚焦']];
+  for (const c of cfg.categories) {
+    for (const r of tally(items, votes[c.key], c.key, cfg.vote)) {
+      summary.push([c.label, r.text, groupLabel(r.groups), items[r.id].rewritten ? '是' : '否', r.votes, pctText(r.pct), r.rank, r.priority ? '是' : '']);
+    }
+  }
+
+  const merges = [['合併後題目', '來源題目', '來源組別']];
+  for (const [, it] of entries(items)) {
+    if (!it.sources) continue;
+    for (const sid of Object.keys(it.sources)) {
+      const src = items[sid];
+      merges.push([it.text, src ? src.text : '（已刪除）', src ? groupLabel(src.groups) : '']);
+    }
+  }
+
+  const detail = [['分類', '姓名', '組別', '所投題目 1', '所投題目 2', '所投題目 3', '時間']];
+  for (const c of cfg.categories) {
+    const ballots = entries(votes[c.key]).map(([, b]) => b)
+      .sort((a, b) => (Number(a.group) - Number(b.group)) || String(a.name).localeCompare(String(b.name), 'zh-Hant'));
+    for (const b of ballots) {
+      const ids = ballotIds(b);
+      detail.push([c.label, b.name, Number(b.group), ids[0] ? textOf(ids[0]) : '', ids[1] ? textOf(ids[1]) : '', ids[2] ? textOf(ids[2]) : '', formatTime(b.ts)]);
+    }
+  }
+
+  const phase = meta.phase && cfg.phases[meta.phase.index];
+  const unique = new Set(cfg.categories.flatMap((c) => Object.keys(votes[c.key] || {})));
+  const info = [['項目', '內容'],
+    ['標題', meta.title || ''], ['代碼', session.code || ''], ['模板', meta.templateId || ''],
+    ['階段', phase ? phase.label : ''], ['匯出時間', formatTime(exportedAt)],
+    ...cfg.categories.map((c) => [`投票人數：${c.label}`, voterCount(votes[c.key])]),
+    ['投票人數（不重複）', unique.size]];
+
+  return [
+    { name: '建議關注點', rows: summary },
+    { name: '合併紀錄', rows: merges },
+    { name: '投票明細', rows: detail },
+    { name: '場次資訊', rows: info },
+  ];
 }
 
 // ---------- 畫面分組（投影） ----------
